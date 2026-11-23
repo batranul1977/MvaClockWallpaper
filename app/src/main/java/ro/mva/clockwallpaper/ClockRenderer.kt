@@ -56,7 +56,10 @@ class ClockRenderer {
         }
     }
 
-    fun draw(c: Canvas, w: Int, h: Int, data: ClockData, timeMs: Long) {
+    fun draw(
+        c: Canvas, w: Int, h: Int, data: ClockData, timeMs: Long,
+        scale: Float = 1f, posY: Float = 0.56f, showDigital: Boolean = true
+    ) {
         ensureStars(w, h)
         c.drawColor(Color.BLACK)
 
@@ -66,11 +69,13 @@ class ClockRenderer {
         val sec = cal.get(Calendar.SECOND)
         val ms = cal.get(Calendar.MILLISECOND)
 
-        val r = min(w, h) * 0.44f
+        val r = min(w, h) * 0.44f * scale
         val cx = w / 2f
-        val cy = h * 0.56f
+        val cy = h * posY
 
         // ---------- Ora digitală + data deasupra cadranului ----------
+        val dow = cal.get(Calendar.DAY_OF_WEEK)
+        if (showDigital) {
         tp.color = Color.WHITE
         tp.typeface = thin
         tp.textSize = r * 0.55f
@@ -80,9 +85,9 @@ class ClockRenderer {
         tp.typeface = light
         tp.textSize = r * 0.085f
         tp.color = Color.parseColor("#DDE3EE")
-        val dow = cal.get(Calendar.DAY_OF_WEEK)
         val dateStr = "${zileLung[dow]}, ${cal.get(Calendar.DAY_OF_MONTH)} ${luni[cal.get(Calendar.MONTH)]}"
         c.drawText(dateStr, cx, timeY + r * 0.15f, tp)
+        }
 
         // ---------- Galaxie de stele în centru ----------
         val tw = (timeMs % 4000L) / 4000f

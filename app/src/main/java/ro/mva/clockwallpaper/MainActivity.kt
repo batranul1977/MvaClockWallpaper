@@ -24,6 +24,9 @@ class MainActivity : Activity() {
         const val KEY_LAT = "lat"
         const val KEY_LON = "lon"
         const val KEY_FPS = "fps"
+        const val KEY_SCALE = "scale"
+        const val KEY_POSY = "posy"
+        const val KEY_DIGITAL = "digital"
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
@@ -90,6 +93,48 @@ class MainActivity : Activity() {
             })
         }
         root.addView(fps)
+
+        // ---- Mărime ceas (40–100%) ----
+        val scaleLabel = label("Mărime ceas: ${prefs.getInt(KEY_SCALE, 70)}%")
+        root.addView(scaleLabel)
+        val scale = SeekBar(this).apply {
+            max = 60
+            progress = prefs.getInt(KEY_SCALE, 70) - 40
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(s: SeekBar?, p: Int, u: Boolean) {
+                    scaleLabel.text = "Mărime ceas: ${p + 40}%"
+                    prefs.edit().putInt(KEY_SCALE, p + 40).apply()   // se vede imediat
+                }
+                override fun onStartTrackingTouch(s: SeekBar?) {}
+                override fun onStopTrackingTouch(s: SeekBar?) {}
+            })
+        }
+        root.addView(scale)
+
+        // ---- Poziție verticală (20–80% din înălțime) ----
+        val posLabel = label("Poziție verticală centru: ${prefs.getInt(KEY_POSY, 45)}% (sus → jos)")
+        root.addView(posLabel)
+        val pos = SeekBar(this).apply {
+            max = 60
+            progress = prefs.getInt(KEY_POSY, 45) - 20
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(s: SeekBar?, p: Int, u: Boolean) {
+                    posLabel.text = "Poziție verticală centru: ${p + 20}% (sus → jos)"
+                    prefs.edit().putInt(KEY_POSY, p + 20).apply()
+                }
+                override fun onStartTrackingTouch(s: SeekBar?) {}
+                override fun onStopTrackingTouch(s: SeekBar?) {}
+            })
+        }
+        root.addView(pos)
+
+        val digital = CheckBox(this).apply {
+            text = "Arată ora digitală și data deasupra cadranului"
+            setTextColor(Color.WHITE)
+            isChecked = prefs.getBoolean(KEY_DIGITAL, true)
+            setOnCheckedChangeListener { _, b -> prefs.edit().putBoolean(KEY_DIGITAL, b).apply() }
+        }
+        root.addView(digital)
 
         root.addView(button("Salvează setările") {
             prefs.edit()

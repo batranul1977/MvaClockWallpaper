@@ -101,7 +101,12 @@ class ClockWallpaperService : WallpaperService() {
                 ?: return
             try {
                 data.city = prefs.getString(MainActivity.KEY_CITY, "București") ?: "București"
-                renderer.draw(canvas, width, height, data, System.currentTimeMillis())
+                renderer.draw(
+                    canvas, width, height, data, System.currentTimeMillis(),
+                    scale = prefs.getInt(MainActivity.KEY_SCALE, 70) / 100f,
+                    posY = prefs.getInt(MainActivity.KEY_POSY, 45) / 100f,
+                    showDigital = prefs.getBoolean(MainActivity.KEY_DIGITAL, true)
+                )
             } finally {
                 try { holder.unlockCanvasAndPost(canvas) } catch (_: Exception) {}
             }
