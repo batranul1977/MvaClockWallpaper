@@ -38,6 +38,7 @@ class ClockRenderer {
     private val medium = Typeface.create("sans-serif-medium", Typeface.NORMAL)
 
     private val p = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val bmpPaint = Paint(Paint.FILTER_BITMAP_FLAG)
     private val tp = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
 
     private var stars: List<FloatArray> = emptyList()
@@ -58,10 +59,20 @@ class ClockRenderer {
 
     fun draw(
         c: Canvas, w: Int, h: Int, data: ClockData, timeMs: Long,
-        scale: Float = 1f, posY: Float = 0.56f, showDigital: Boolean = true
+        scale: Float = 1f, posY: Float = 0.56f, showDigital: Boolean = true,
+        background: Bitmap? = null, dim: Float = 0.4f, plate: Boolean = true
     ) {
         ensureStars(w, h)
         c.drawColor(Color.BLACK)
+        if (background != null) {
+            // center-crop pe tot ecranul
+            val sc = max(w / background.width.toFloat(), h / background.height.toFloat())
+            val bw = background.width * sc; val bh = background.height * sc
+            val dst = RectF((w - bw) / 2f, (h - bh) / 2f, (w + bw) / 2f, (h + bh) / 2f)
+            p.shader = null
+            c.drawBitmap(background, null, dst, bmpPaint)
+            if (dim > 0f) c.drawColor(Color.argb((dim * 255).toInt(), 0, 0, 0))
+        }
 
         val cal = Calendar.getInstance().apply { timeInMillis = timeMs }
         val hour = cal.get(Calendar.HOUR_OF_DAY)
@@ -87,6 +98,18 @@ class ClockRenderer {
         tp.color = Color.parseColor("#DDE3EE")
         val dateStr = "${zileLung[dow]}, ${cal.get(Calendar.DAY_OF_MONTH)} ${luni[cal.get(Calendar.MONTH)]}"
         c.drawText(dateStr, cx, timeY + r * 0.15f, tp)
+        }
+
+        // ---------- Placă întunecată sub cadran (lizibilitate pe fundal cu imagine) ----------
+        if (plate && background != null) {
+            p.shader = RadialGradient(
+                cx, cy, r * 1.15f,
+                intArrayOf(Color.argb(235, 0, 0, 0), Color.argb(200, 0, 0, 0), Color.TRANSPARENT),
+                floatArrayOf(0f, 0.85f, 1f), Shader.TileMode.CLAMP
+            )
+            p.style = Paint.Style.FILL
+            c.drawCircle(cx, cy, r * 1.15f, p)
+            p.shader = null
         }
 
         // ---------- Galaxie de stele în centru ----------

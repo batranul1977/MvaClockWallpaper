@@ -31,6 +31,9 @@ class ClockWallpaperService : WallpaperService() {
         private var width = 0
         private var height = 0
         private var lastWeatherFetch = 0L
+        private var bgBitmap: android.graphics.Bitmap? = null
+        private var bgUri: String? = null
+        @Volatile private var bgLoading = false
 
         private val prefs by lazy { getSharedPreferences(MainActivity.PREFS, Context.MODE_PRIVATE) }
         private val sensorManager by lazy { getSystemService(Context.SENSOR_SERVICE) as SensorManager }
@@ -101,15 +104,46 @@ class ClockWallpaperService : WallpaperService() {
                 ?: return
             try {
                 data.city = prefs.getString(MainActivity.KEY_CITY, "București") ?: "București"
+                checkBackground()
                 renderer.draw(
                     canvas, width, height, data, System.currentTimeMillis(),
                     scale = prefs.getInt(MainActivity.KEY_SCALE, 70) / 100f,
                     posY = prefs.getInt(MainActivity.KEY_POSY, 45) / 100f,
-                    showDigital = prefs.getBoolean(MainActivity.KEY_DIGITAL, true)
+                    showDigital = prefs.getBoolean(MainActivity.KEY_DIGITAL, true),
+                    background = bgBitmap,
+                    dim = prefs.getInt(MainActivity.KEY_DIM, 40) / 100f,
+                    plate = prefs.getBoolean(MainActivity.KEY_PLATE, true)
                 )
             } finally {
                 try { holder.unlockCanvasAndPost(canvas) } catch (_: Exception) {}
             }
+        }
+
+        // ------------------- FUNDAL IMAGINE -------------------
+        private fun checkBackground() {
+            val uri = prefs.getString(MainActivity.KEY_BG, null)
+            if (uri == bgUri || bgLoading) return
+            if (uri == null) { bgUri = null; bgBitmap = null; return }
+            bgLoading = true
+            val w = width; val h = height
+            thread {
+                val bmp = try { decodeScaled(android.net.Uri.parse(uri), w, h) } catch (_: Exception) { null }
+                handler.post {
+                    bgBitmap = bmp
+                    bgUri = uri
+                    bgLoading = false
+                }
+            }
+        }
+
+        private fun decodeScaled(uri: android.net.Uri, reqW: Int, reqH: Int): android.graphics.Bitmap? {
+            val cr = contentResolver
+            val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            cr.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, opts) }
+            var sample = 1
+            while (opts.outWidth / (sample * 2) >= reqW && opts.outHeight / (sample * 2) >= reqH) sample *= 2
+            val o2 = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+            return cr.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, o2) }
         }
 
         // ------------------- PAȘI -------------------

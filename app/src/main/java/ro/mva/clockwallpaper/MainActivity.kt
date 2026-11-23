@@ -27,6 +27,23 @@ class MainActivity : Activity() {
         const val KEY_SCALE = "scale"
         const val KEY_POSY = "posy"
         const val KEY_DIGITAL = "digital"
+        const val KEY_BG = "bg_uri"
+        const val KEY_DIM = "bg_dim"
+        const val KEY_PLATE = "bg_plate"
+        const val REQ_IMAGE = 42
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQ_IMAGE && resultCode == RESULT_OK) {
+            val uri = data?.data ?: return
+            try {
+                contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            } catch (_: Exception) {}
+            getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_BG, uri.toString()).apply()
+            Toast.makeText(this, "Imagine setată ca fundal", Toast.LENGTH_SHORT).show()
+            recreate()
+        }
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
@@ -135,6 +152,43 @@ class MainActivity : Activity() {
             setOnCheckedChangeListener { _, b -> prefs.edit().putBoolean(KEY_DIGITAL, b).apply() }
         }
         root.addView(digital)
+
+        // ---- Fundal ----
+        val bgLabel = label(
+            if (prefs.getString(KEY_BG, null) != null) "Fundal: imagine aleasă" else "Fundal: negru"
+        )
+        root.addView(bgLabel)
+        root.addView(button("Alege imagine de fundal din galerie") {
+            startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "image/*"
+            }, REQ_IMAGE)
+        })
+        root.addView(button("Fundal negru (fără imagine)") {
+            prefs.edit().remove(KEY_BG).apply()
+            bgLabel.text = "Fundal: negru"
+        })
+
+        val dimLabel = label("Întunecare imagine: ${prefs.getInt(KEY_DIM, 40)}%")
+        root.addView(dimLabel)
+        root.addView(SeekBar(this).apply {
+            max = 90
+            progress = prefs.getInt(KEY_DIM, 40)
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(s: SeekBar?, p: Int, u: Boolean) {
+                    dimLabel.text = "Întunecare imagine: $p%"
+                    prefs.edit().putInt(KEY_DIM, p).apply()
+                }
+                override fun onStartTrackingTouch(s: SeekBar?) {}
+                override fun onStopTrackingTouch(s: SeekBar?) {}
+            })
+        })
+        root.addView(CheckBox(this).apply {
+            text = "Cerc întunecat sub cadran (citire mai ușoară)"
+            setTextColor(Color.WHITE)
+            isChecked = prefs.getBoolean(KEY_PLATE, true)
+            setOnCheckedChangeListener { _, b -> prefs.edit().putBoolean(KEY_PLATE, b).apply() }
+        })
 
         root.addView(button("Salvează setările") {
             prefs.edit()
