@@ -30,6 +30,17 @@ class MainActivity : Activity() {
         const val KEY_BG = "bg_uri"
         const val KEY_DIM = "bg_dim"
         const val KEY_PLATE = "bg_plate"
+        const val KEY_STEP_CM = "step_cm"
+        const val KEY_ZOOM = "zoom_pct"
+        const val KEY_ZOOM_ON = "zoom_on"
+        const val KEY_GOAL = "step_goal"
+        const val KEY_WEIGHT = "weight_kg"
+        const val KEY_THEME = "theme"
+        const val KEY_NIGHT_ON = "night_on"
+        const val KEY_NIGHT_FROM = "night_from"
+        const val KEY_NIGHT_TO = "night_to"
+        const val KEY_DTAP_ON = "dtap_on"
+        const val KEY_TAP_APP = "tap_app"
         const val REQ_IMAGE = 42
     }
 
@@ -47,6 +58,20 @@ class MainActivity : Activity() {
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+
+    private var histView: StepHistoryView? = null
+
+    override fun onResume() {
+        super.onResume()
+        histView?.invalidate()   // graficul se actualizează la revenirea în aplicație
+    }
+
+    private fun appName(pkg: String): String {
+        if (pkg.isEmpty()) return "Alarme (implicit)"
+        return try {
+            packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString()
+        } catch (_: Exception) { pkg }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -82,12 +107,44 @@ class MainActivity : Activity() {
             setOnClickListener { onClick() }
         }
 
+        fun section(t: String) = label(t, 15f, "#8FB8FF")
+
+        /** Slider salvat imediat în preferințe. */
+        fun slider(key: String, def: Int, lo: Int, hi: Int, step: Int = 1, text: (Int) -> String) {
+            val lb = label(text(prefs.getInt(key, def)))
+            root.addView(lb)
+            root.addView(SeekBar(this).apply {
+                max = (hi - lo) / step
+                progress = (prefs.getInt(key, def) - lo) / step
+                setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(s: SeekBar?, p: Int, u: Boolean) {
+                        val v = lo + p * step
+                        lb.text = text(v)
+                        prefs.edit().putInt(key, v).apply()
+                    }
+                    override fun onStartTrackingTouch(s: SeekBar?) {}
+                    override fun onStopTrackingTouch(s: SeekBar?) {}
+                })
+            })
+        }
+
+        fun check(t: String, key: String, def: Boolean) = CheckBox(this).apply {
+            text = t
+            setTextColor(Color.WHITE)
+            isChecked = prefs.getBoolean(key, def)
+            setOnCheckedChangeListener { _, b -> prefs.edit().putBoolean(key, b).apply() }
+        }
+
         root.addView(TextView(this).apply {
             text = "MVA Clock Wallpaper"
             textSize = 26f
             setTextColor(Color.WHITE)
             gravity = Gravity.CENTER_HORIZONTAL
         })
+
+        root.addView(section("ISTORIC PAȘI — ULTIMELE 7 ZILE"))
+        histView = StepHistoryView(this)
+        root.addView(histView)
 
         root.addView(label("Oraș (afișat sub vreme)"))
         val city = field(prefs.getString(KEY_CITY, "București")!!, false); root.addView(city)
@@ -188,6 +245,98 @@ class MainActivity : Activity() {
             setTextColor(Color.WHITE)
             isChecked = prefs.getBoolean(KEY_PLATE, true)
             setOnCheckedChangeListener { _, b -> prefs.edit().putBoolean(KEY_PLATE, b).apply() }
+        })
+
+        // ---- Pași & distanță ----
+        root.addView(label("PAȘI & DISTANȚĂ", 15f, "#8FB8FF"))
+        val stepLabel = label("Lungime pas: ${prefs.getInt(KEY_STEP_CM, 70)} cm  (km stânga / metri dreapta)")
+        root.addView(stepLabel)
+        root.addView(SeekBar(this).apply {
+            max = 60 // 40–100 cm
+            progress = prefs.getInt(KEY_STEP_CM, 70) - 40
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(s: SeekBar?, p: Int, u: Boolean) {
+                    stepLabel.text = "Lungime pas: ${p + 40} cm  (km stânga / metri dreapta)"
+                    prefs.edit().putInt(KEY_STEP_CM, p + 40).apply()
+                }
+                override fun onStartTrackingTouch(s: SeekBar?) {}
+                override fun onStopTrackingTouch(s: SeekBar?) {}
+            })
+        })
+        root.addView(label("Sfat: înălțime × 0,415 ≈ lungimea pasului (ex. 175 cm → 73 cm)", 12f))
+
+        // ---- Lupă ----
+        root.addView(label("LUPĂ", 15f, "#8FB8FF"))
+        root.addView(CheckBox(this).apply {
+            text = "Mărește ceasul cât ții degetul apăsat pe el"
+            setTextColor(Color.WHITE)
+            isChecked = prefs.getBoolean(KEY_ZOOM_ON, true)
+            setOnCheckedChangeListener { _, b -> prefs.edit().putBoolean(KEY_ZOOM_ON, b).apply() }
+        })
+        val zoomLabel = label("Mărire lupă: ${prefs.getInt(KEY_ZOOM, 150)}%")
+        root.addView(zoomLabel)
+        root.addView(SeekBar(this).apply {
+            max = 90 // 110–200 %
+            progress = prefs.getInt(KEY_ZOOM, 150) - 110
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(s: SeekBar?, p: Int, u: Boolean) {
+                    zoomLabel.text = "Mărire lupă: ${p + 110}%"
+                    prefs.edit().putInt(KEY_ZOOM, p + 110).apply()
+                }
+                override fun onStartTrackingTouch(s: SeekBar?) {}
+                override fun onStopTrackingTouch(s: SeekBar?) {}
+            })
+        })
+
+        // ---- Obiectiv + calorii ----
+        root.addView(section("OBIECTIV & CALORII"))
+        slider(KEY_GOAL, 6000, 1000, 20000, 500) { "Obiectiv zilnic: $it pași (bara se face verde la atingere)" }
+        slider(KEY_WEIGHT, 80, 40, 150) { "Greutate: $it kg (pentru calcul kcal)" }
+
+        // ---- Temă culoare ----
+        root.addView(section("TEMĂ CULOARE"))
+        root.addView(RadioGroup(this).apply {
+            orientation = RadioGroup.VERTICAL
+            val cur = prefs.getInt(KEY_THEME, 0)
+            ClockThemes.names.forEachIndexed { i, n ->
+                addView(RadioButton(this@MainActivity).apply {
+                    id = 1000 + i
+                    text = n
+                    setTextColor(Color.parseColor(ClockThemes.light[i]))
+                    buttonTintList = android.content.res.ColorStateList.valueOf(Color.parseColor(ClockThemes.main[i]))
+                    isChecked = i == cur
+                })
+            }
+            setOnCheckedChangeListener { _, id -> prefs.edit().putInt(KEY_THEME, id - 1000).apply() }
+        })
+
+        // ---- Mod de noapte ----
+        root.addView(section("MOD ECONOMIC DE NOAPTE"))
+        root.addView(check("Noaptea: fără secundar, culori estompate, 1 cadru/s", KEY_NIGHT_ON, true))
+        slider(KEY_NIGHT_FROM, 23, 0, 23) { "Începe la ora: $it:00" }
+        slider(KEY_NIGHT_TO, 7, 0, 23) { "Se termină la ora: $it:00" }
+
+        // ---- Atingere dublă ----
+        root.addView(section("ATINGERE DUBLĂ PE CEAS"))
+        root.addView(check("Două atingeri rapide pe ceas deschid o aplicație", KEY_DTAP_ON, true))
+        val tapLabel = label("Aplicație: ${appName(prefs.getString(KEY_TAP_APP, "") ?: "")}")
+        root.addView(tapLabel)
+        root.addView(button("Alege aplicația") {
+            val pm = packageManager
+            val apps = pm.queryIntentActivities(
+                Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0
+            ).map { it.loadLabel(pm).toString() to it.activityInfo.packageName }
+                .distinctBy { it.second }
+                .sortedBy { it.first.lowercase() }
+            val names = arrayOf("⏰ Alarme (implicit)") + apps.map { it.first }
+            android.app.AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+                .setTitle("Aplicație la atingere dublă")
+                .setItems(names) { _, w ->
+                    val pkg = if (w == 0) "" else apps[w - 1].second
+                    prefs.edit().putString(KEY_TAP_APP, pkg).apply()
+                    tapLabel.text = "Aplicație: ${appName(pkg)}"
+                }
+                .show()
         })
 
         root.addView(button("Salvează setările") {

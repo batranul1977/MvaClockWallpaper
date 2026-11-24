@@ -15,14 +15,43 @@ data class ClockData(
     var tempMax: Int? = null,
     var weatherText: String = "",
     var weatherIcon: String = "",
-    var city: String = "București"
+    var city: String = "București",
+    var forecast: List<String> = emptyList(),   // următoarele 3 ore, ex. "10h ☁3°"
+    var rainAlert: String = ""                  // ex. "Ploaie ~10:00 · 70%"
 )
+
+/** Teme de culoare: principal, deschis, închis, culoare stele (r,g,b). */
+object ClockThemes {
+    val names = arrayOf("Albastru", "Auriu", "Verde", "Roșu", "Mov")
+    val main = arrayOf("#2F7BFF", "#D4A017", "#22C55E", "#EF4444", "#8B5CF6")
+    val light = arrayOf("#8FB8FF", "#F5D77A", "#86EFAC", "#FCA5A5", "#C4B5FD")
+    val dark = arrayOf("#0B2A7A", "#5A4208", "#0B4D25", "#6B1111", "#3B1D7A")
+    val stars = arrayOf(
+        intArrayOf(120, 170, 255), intArrayOf(255, 215, 140), intArrayOf(130, 240, 170),
+        intArrayOf(255, 150, 150), intArrayOf(190, 160, 255)
+    )
+}
 
 class ClockRenderer {
 
-    private val blue = Color.parseColor("#2F7BFF")
-    private val blueLight = Color.parseColor("#8FB8FF")
-    private val blueDark = Color.parseColor("#0B2A7A")
+    // culorile temei curente (numele „blue*" au rămas din versiunea inițială)
+    private var blue = Color.parseColor("#2F7BFF")
+    private var blueLight = Color.parseColor("#8FB8FF")
+    private var blueDark = Color.parseColor("#0B2A7A")
+    private var starRgb = intArrayOf(120, 170, 255)
+    private var themeIdx = -1
+    private val green = Color.parseColor("#22C55E")
+    private val amber = Color.parseColor("#FFB74D")
+
+    private fun applyTheme(i: Int) {
+        val t = i.coerceIn(0, ClockThemes.names.size - 1)
+        if (t == themeIdx) return
+        themeIdx = t
+        blue = Color.parseColor(ClockThemes.main[t])
+        blueLight = Color.parseColor(ClockThemes.light[t])
+        blueDark = Color.parseColor(ClockThemes.dark[t])
+        starRgb = ClockThemes.stars[t]
+    }
     private val red = Color.parseColor("#E53935")
     private val grey = Color.parseColor("#9AA4B8")
 
@@ -60,9 +89,13 @@ class ClockRenderer {
     fun draw(
         c: Canvas, w: Int, h: Int, data: ClockData, timeMs: Long,
         scale: Float = 1f, posY: Float = 0.56f, showDigital: Boolean = true,
-        background: Bitmap? = null, dim: Float = 0.4f, plate: Boolean = true
+        background: Bitmap? = null, dim: Float = 0.4f, plate: Boolean = true,
+        stepLenCm: Int = 70, zoom: Float = 1f,
+        theme: Int = 0, night: Boolean = false, goal: Int = 6000, weightKg: Int = 80
     ) {
+        applyTheme(theme)
         ensureStars(w, h)
+        val phaseB = (timeMs / 5000L) % 2L == 1L   // alternare la 5 secunde
         c.drawColor(Color.BLACK)
         if (background != null) {
             // center-crop pe tot ecranul
@@ -86,8 +119,11 @@ class ClockRenderer {
 
         // ---------- Ora digitală + data deasupra cadranului ----------
         val dow = cal.get(Calendar.DAY_OF_WEEK)
-        if (showDigital) {
+        // ora digitală se estompează când cadranul e mărit (lupa), ca să nu se suprapună
+        val digitalAlpha = (1f - (zoom - 1f) * 4f).coerceIn(0f, 1f)
+        if (showDigital && digitalAlpha > 0.01f) {
         tp.color = Color.WHITE
+        tp.alpha = (255 * digitalAlpha).toInt()
         tp.typeface = thin
         tp.textSize = r * 0.55f
         val timeY = cy - r - r * 0.42f
@@ -97,8 +133,14 @@ class ClockRenderer {
         tp.textSize = r * 0.085f
         tp.color = Color.parseColor("#DDE3EE")
         val dateStr = "${zileLung[dow]}, ${cal.get(Calendar.DAY_OF_MONTH)} ${luni[cal.get(Calendar.MONTH)]}"
+        tp.alpha = (255 * digitalAlpha).toInt()
         c.drawText(dateStr, cx, timeY + r * 0.15f, tp)
+        tp.alpha = 255
         }
+
+        // ---------- LUPĂ: tot cadranul se mărește în jurul centrului ----------
+        c.save()
+        if (zoom != 1f) c.scale(zoom, zoom, cx, cy)
 
         // ---------- Placă întunecată sub cadran (lizibilitate pe fundal cu imagine) ----------
         if (plate && background != null) {
@@ -113,13 +155,13 @@ class ClockRenderer {
         }
 
         // ---------- Galaxie de stele în centru ----------
-        val tw = (timeMs % 4000L) / 4000f
+        val tw = if (night) 0.25f else (timeMs % 4000L) / 4000f
         for (s in stars) {
             val sx = cx + cos(s[0]) * s[1] * r
             val sy = cy + sin(s[0]) * s[1] * r
             val twinkle = 0.45f + 0.55f * abs(sin((tw + s[3]) * PI.toFloat()))
             p.style = Paint.Style.FILL
-            p.color = Color.argb((200 * twinkle).toInt(), 120, 170, 255)
+            p.color = Color.argb((200 * twinkle).toInt(), starRgb[0], starRgb[1], starRgb[2])
             c.drawCircle(sx, sy, s[2] * r / 300f, p)
         }
 
@@ -174,13 +216,25 @@ class ClockRenderer {
         tp.textSize = r * 0.075f
         tp.color = Color.WHITE
         if (data.tempNow != null) {
-            c.drawText("${data.weatherIcon}  ${data.weatherText}", cx, cy - r * 0.44f, tp)
+            if (data.rainAlert.isNotEmpty()) {
+                tp.color = amber
+                c.drawText("☔ ${data.rainAlert}", cx, cy - r * 0.44f, tp)
+                tp.color = Color.WHITE
+            } else {
+                c.drawText("${data.weatherIcon}  ${data.weatherText}", cx, cy - r * 0.44f, tp)
+            }
             tp.textSize = r * 0.095f
             c.drawText("${data.tempNow}°C   ${data.tempMin}/${data.tempMax}", cx, cy - r * 0.31f, tp)
             p.style = Paint.Style.STROKE; p.color = grey; p.strokeWidth = 1.5f
             c.drawLine(cx - r * 0.22f, cy - r * 0.27f, cx + r * 0.22f, cy - r * 0.27f, p)
             tp.textSize = r * 0.06f; tp.color = grey
-            c.drawText(data.city, cx, cy - r * 0.19f, tp)
+            if (phaseB && data.forecast.isNotEmpty()) {
+                // prognoza pe următoarele 3 ore, alternând cu numele orașului
+                tp.textSize = r * 0.05f; tp.color = Color.parseColor("#C8D3EA")
+                c.drawText(data.forecast.joinToString("   "), cx, cy - r * 0.19f, tp)
+            } else {
+                c.drawText(data.city, cx, cy - r * 0.19f, tp)
+            }
         } else {
             tp.color = grey
             c.drawText("☁  vremea se încarcă…", cx, cy - r * 0.35f, tp)
@@ -224,17 +278,54 @@ class ClockRenderer {
         tp.textSize = r * 0.09f
         c.drawText(if (data.steps >= 0) data.steps.toString() else "--", cx, cy + r * 0.48f, tp)
         tp.textSize = r * 0.055f; tp.color = grey
-        c.drawText("pași azi", cx, cy + r * 0.56f, tp)
+        if (phaseB && data.steps >= 0) {
+            val kcal = (data.steps * weightKg * 0.00057).roundToInt()
+            tp.color = amber
+            c.drawText("🔥 $kcal kcal", cx, cy + r * 0.56f, tp)
+        } else {
+            c.drawText("pași azi", cx, cy + r * 0.56f, tp)
+        }
+
+        // Bara obiectivului zilnic de pași (verde când e atins)
+        if (data.steps >= 0 && goal > 0) {
+            val prog = (data.steps / goal.toFloat()).coerceIn(0f, 1f)
+            val gw = r * 0.44f; val gx = cx - gw / 2; val gy = cy + r * 0.605f; val gh = r * 0.022f
+            p.shader = null; p.style = Paint.Style.FILL
+            p.color = Color.parseColor("#1B2235")
+            c.drawRoundRect(gx, gy, gx + gw, gy + gh, gh / 2, gh / 2, p)
+            p.color = if (prog >= 1f) green else blue
+            if (prog > 0f) c.drawRoundRect(gx, gy, gx + max(gh, gw * prog), gy + gh, gh / 2, gh / 2, p)
+        }
+
+        // Distanță: stânga KM, dreapta METRI (pași × lungimea pasului)
+        val meters = if (data.steps >= 0) data.steps * stepLenCm / 100.0 else -1.0
+        val sideX = r * 0.27f
+        tp.typeface = medium
+        tp.color = blueLight
+        tp.textSize = r * 0.072f
+        c.drawText(if (meters >= 0) String.format("%.2f", meters / 1000.0) else "--", cx - sideX, cy + r * 0.48f, tp)
+        c.drawText(if (meters >= 0) meters.roundToInt().toString() else "--", cx + sideX, cy + r * 0.48f, tp)
+        tp.textSize = r * 0.05f; tp.color = grey
+        c.drawText("km", cx - sideX, cy + r * 0.56f, tp)
+        c.drawText("metri", cx + sideX, cy + r * 0.56f, tp)
+        // separatori fini între grupuri
+        p.shader = null
+        p.style = Paint.Style.STROKE
+        p.strokeWidth = r * 0.004f
+        p.color = Color.parseColor("#3A4560")
+        c.drawLine(cx - r * 0.145f, cy + r * 0.41f, cx - r * 0.145f, cy + r * 0.56f, p)
+        c.drawLine(cx + r * 0.145f, cy + r * 0.41f, cx + r * 0.145f, cy + r * 0.56f, p)
 
         // ---------- Ace ----------
-        val secF = sec + ms / 1000f
+        val secF = if (night) sec.toFloat() else sec + ms / 1000f
         val minF = minute + secF / 60f
         val hourF = (hour % 12) + minF / 60f
 
         drawSwordHand(c, cx, cy, hourF * 30f, r * 0.52f, r * 0.055f)
         drawSwordHand(c, cx, cy, minF * 6f, r * 0.80f, r * 0.045f)
 
-        // secundar
+        // secundar (ascuns în modul de noapte)
+        if (!night) {
         val sa = Math.toRadians(secF * 6.0 - 90).toFloat()
         p.style = Paint.Style.STROKE
         p.shader = null
@@ -245,6 +336,7 @@ class ClockRenderer {
             cx - cos(sa) * r * 0.15f, cy - sin(sa) * r * 0.15f,
             cx + cos(sa) * r * 0.92f, cy + sin(sa) * r * 0.92f, p
         )
+        }
 
         // pivot central
         p.style = Paint.Style.FILL
@@ -252,6 +344,11 @@ class ClockRenderer {
         c.drawCircle(cx, cy, r * 0.035f, p)
         p.color = Color.parseColor("#6A7387")
         c.drawCircle(cx, cy, r * 0.016f, p)
+
+        c.restore() // sfârșit lupă
+
+        // mod de noapte: totul mai întunecat
+        if (night) c.drawColor(Color.argb(110, 0, 0, 0))
     }
 
     /** Ac tip "sabie" — contur alb, interior albastru, ca în cadranul original. */

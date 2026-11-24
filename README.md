@@ -29,3 +29,12 @@ baterie, pași de azi și vremea (Open-Meteo, fără cheie API).
   automat când ecranul e stins sau wallpaper-ul nu e vizibil.
 - Ecran de blocare: pe One UI live wallpaper-ele de la terți pot fi limitate la ecranul principal,
   în funcție de versiune.
+
+## Noutăți v1.2
+- Pași: **km în stânga**, **metri în dreapta**, bară obiectiv zilnic (verde la atingere), alternare „pași azi" ↔ „🔥 kcal" la 5 s
+- **Lupă**: ține degetul pe ceas → se mărește; ridici degetul → revine (110–200%)
+- **Atingere dublă** pe ceas → deschide aplicația aleasă (implicit Alarme)
+- **Mod economic de noapte** (implicit 23–07): fără secundar, estompat, 1 cadru/s
+- **Teme**: Albastru, Auriu, Verde, Roșu, Mov
+- **Prognoză 3 ore** (alternează cu orașul) + **alertă ploaie/ninsoare** în următoarea oră
+- **Istoric pași 7 zile** (grafic în aplicație, cu km pe zi)

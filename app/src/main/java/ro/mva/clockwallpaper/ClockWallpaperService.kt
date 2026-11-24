@@ -6,16 +6,23 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.BatteryManager
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.service.wallpaper.WallpaperService
+import android.view.MotionEvent
 import android.view.SurfaceHolder
+import android.view.ViewConfiguration
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.concurrent.thread
+import kotlin.math.abs
+import kotlin.math.exp
+import kotlin.math.hypot
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 class ClockWallpaperService : WallpaperService() {
@@ -35,6 +42,22 @@ class ClockWallpaperService : WallpaperService() {
         private var bgUri: String? = null
         @Volatile private var bgLoading = false
 
+        // ---- lupă (zoom la apăsare) ----
+        private var zoomCur = 1f
+        private var zoomTarget = 1f
+        private var lastFrameMs = 0L
+        private var downX = 0f
+        private var downY = 0f
+        private var lastTouchMs = 0L
+        private val touchSlop by lazy { ViewConfiguration.get(this@ClockWallpaperService).scaledTouchSlop * 2f }
+        private val zoomOff = Runnable { zoomTarget = 1f }
+
+        // ---- atingere dublă ----
+        private var lastTapMs = 0L
+        private var lastTapX = 0f
+        private var lastTapY = 0f
+        private var lastSavedSteps = -1
+
         private val prefs by lazy { getSharedPreferences(MainActivity.PREFS, Context.MODE_PRIVATE) }
         private val sensorManager by lazy { getSystemService(Context.SENSOR_SERVICE) as SensorManager }
 
@@ -42,7 +65,12 @@ class ClockWallpaperService : WallpaperService() {
             override fun run() {
                 drawFrame()
                 if (visible) {
-                    val fps = prefs.getInt(MainActivity.KEY_FPS, 30).coerceIn(1, 60)
+                    val animating = zoomTarget > 1f || abs(zoomCur - zoomTarget) > 0.001f
+                    val fps = when {
+                        animating -> 60
+                        isNight() -> 1   // mod economic: un cadru pe secundă
+                        else -> prefs.getInt(MainActivity.KEY_FPS, 30).coerceIn(1, 60)
+                    }
                     handler.postDelayed(this, (1000L / fps))
                 }
             }
@@ -61,6 +89,7 @@ class ClockWallpaperService : WallpaperService() {
 
         override fun onCreate(surfaceHolder: SurfaceHolder) {
             super.onCreate(surfaceHolder)
+            setTouchEventsEnabled(true)
             val sticky = registerReceiver(batteryReceiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
             sticky?.let { batteryReceiver.onReceive(this@ClockWallpaperService, it) }
         }
@@ -80,6 +109,9 @@ class ClockWallpaperService : WallpaperService() {
                 handler.post(drawRunnable)
             } else {
                 handler.removeCallbacks(drawRunnable)
+                handler.removeCallbacks(zoomOff)
+                zoomTarget = 1f; zoomCur = 1f
+                saveStepHistory(force = true)
                 sensorManager.unregisterListener(this)
             }
         }
@@ -96,8 +128,112 @@ class ClockWallpaperService : WallpaperService() {
             handler.removeCallbacks(drawRunnable)
         }
 
+        // ------------------- LUPĂ -------------------
+        private fun clockGeom(): Triple<Float, Float, Float> {
+            val r = min(width, height) * 0.44f * (prefs.getInt(MainActivity.KEY_SCALE, 70) / 100f)
+            val cy = height * (prefs.getInt(MainActivity.KEY_POSY, 45) / 100f)
+            return Triple(width / 2f, cy, r)
+        }
+
+        private fun insideClock(x: Float, y: Float): Boolean {
+            val (cx, cy, r) = clockGeom()
+            return hypot(x - cx, y - cy) <= r * 1.08f
+        }
+
+        private fun zoomMax() = prefs.getInt(MainActivity.KEY_ZOOM, 150).coerceIn(110, 200) / 100f
+
+        private fun kick() {
+            handler.removeCallbacks(drawRunnable)
+            if (visible) handler.post(drawRunnable)
+        }
+
+        override fun onTouchEvent(e: MotionEvent) {
+            super.onTouchEvent(e)
+            lastTouchMs = System.currentTimeMillis()
+            val zoomOn = prefs.getBoolean(MainActivity.KEY_ZOOM_ON, true)
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> if (insideClock(e.x, e.y)) {
+                    downX = e.x; downY = e.y
+                    if (zoomOn) {
+                        handler.removeCallbacks(zoomOff)
+                        zoomTarget = zoomMax()
+                        kick()
+                    }
+                }
+                // dacă degetul alunecă (schimbi pagina), renunțăm la lupă
+                MotionEvent.ACTION_MOVE -> if (zoomTarget > 1f && hypot(e.x - downX, e.y - downY) > touchSlop) zoomTarget = 1f
+                MotionEvent.ACTION_UP -> {
+                    zoomTarget = 1f
+                    val isTap = e.eventTime - e.downTime < 300 && hypot(e.x - downX, e.y - downY) <= touchSlop
+                    if (isTap) onTap(e.x, e.y)
+                }
+                MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_POINTER_DOWN -> zoomTarget = 1f
+            }
+        }
+
+        // Rezervă: unele launchere trimit doar „tap", nu evenimente de atingere
+        override fun onCommand(action: String?, x: Int, y: Int, z: Int, extras: Bundle?, resultRequested: Boolean): Bundle? {
+            if (action == android.app.WallpaperManager.COMMAND_TAP &&
+                System.currentTimeMillis() - lastTouchMs > 1500
+            ) {
+                val fx = x.toFloat(); val fy = y.toFloat()
+                if (prefs.getBoolean(MainActivity.KEY_ZOOM_ON, true) && insideClock(fx, fy)) {
+                    zoomTarget = zoomMax()
+                    handler.removeCallbacks(zoomOff)
+                    handler.postDelayed(zoomOff, 2000)
+                    kick()
+                }
+                onTap(fx, fy)
+            }
+            return super.onCommand(action, x, y, z, extras, resultRequested)
+        }
+
+        /** Două atingeri rapide pe ceas → deschide aplicația aleasă. */
+        private fun onTap(x: Float, y: Float) {
+            if (!prefs.getBoolean(MainActivity.KEY_DTAP_ON, true) || !insideClock(x, y)) return
+            val now = System.currentTimeMillis()
+            if (now - lastTapMs < 400 && hypot(x - lastTapX, y - lastTapY) < touchSlop * 4) {
+                lastTapMs = 0L
+                zoomTarget = 1f
+                launchChosenApp()
+            } else {
+                lastTapMs = now; lastTapX = x; lastTapY = y
+            }
+        }
+
+        private fun launchChosenApp() {
+            val pkg = prefs.getString(MainActivity.KEY_TAP_APP, "") ?: ""
+            val intent = if (pkg.isNotEmpty()) packageManager.getLaunchIntentForPackage(pkg)
+                         else Intent(android.provider.AlarmClock.ACTION_SHOW_ALARMS)
+            intent ?: return
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            try { startActivity(intent) } catch (_: Exception) {}
+        }
+
+        // ------------------- MOD DE NOAPTE -------------------
+        private fun isNight(): Boolean {
+            if (!prefs.getBoolean(MainActivity.KEY_NIGHT_ON, true)) return false
+            val h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+            val from = prefs.getInt(MainActivity.KEY_NIGHT_FROM, 23)
+            val to = prefs.getInt(MainActivity.KEY_NIGHT_TO, 7)
+            return when {
+                from == to -> false
+                from < to -> h in from until to
+                else -> h >= from || h < to
+            }
+        }
+
+        private fun stepZoom() {
+            val now = System.currentTimeMillis()
+            val dt = if (lastFrameMs == 0L) 16L else (now - lastFrameMs).coerceIn(1L, 200L)
+            lastFrameMs = now
+            zoomCur += (zoomTarget - zoomCur) * (1f - exp(-dt / 70f))
+            if (abs(zoomCur - zoomTarget) < 0.002f) zoomCur = zoomTarget
+        }
+
         private fun drawFrame() {
             if (width == 0 || height == 0) return
+            stepZoom()
             val holder = surfaceHolder
             val canvas = try { holder.lockHardwareCanvas() } catch (_: Exception) { null }
                 ?: try { holder.lockCanvas() } catch (_: Exception) { null }
@@ -112,7 +248,13 @@ class ClockWallpaperService : WallpaperService() {
                     showDigital = prefs.getBoolean(MainActivity.KEY_DIGITAL, true),
                     background = bgBitmap,
                     dim = prefs.getInt(MainActivity.KEY_DIM, 40) / 100f,
-                    plate = prefs.getBoolean(MainActivity.KEY_PLATE, true)
+                    plate = prefs.getBoolean(MainActivity.KEY_PLATE, true),
+                    stepLenCm = prefs.getInt(MainActivity.KEY_STEP_CM, 70),
+                    zoom = zoomCur,
+                    theme = prefs.getInt(MainActivity.KEY_THEME, 0),
+                    night = isNight() && zoomCur <= 1.001f,   // la lupă arătăm normal
+                    goal = prefs.getInt(MainActivity.KEY_GOAL, 6000),
+                    weightKg = prefs.getInt(MainActivity.KEY_WEIGHT, 80)
                 )
             } finally {
                 try { holder.unlockCanvasAndPost(canvas) } catch (_: Exception) {}
@@ -166,6 +308,16 @@ class ClockWallpaperService : WallpaperService() {
                 prefs.edit().putString("steps_day", today).putLong("steps_base", base).apply()
             }
             data.steps = (total - base).toInt()
+            saveStepHistory(force = false)
+        }
+
+        /** Istoric pași: cheia hist_yyyyMMdd = pașii acelei zile (folosit de graficul pe 7 zile). */
+        private fun saveStepHistory(force: Boolean) {
+            if (data.steps < 0) return
+            if (!force && lastSavedSteps >= 0 && abs(data.steps - lastSavedSteps) < 10) return
+            val day = prefs.getString("steps_day", null) ?: return
+            prefs.edit().putInt("hist_$day", data.steps).apply()
+            lastSavedSteps = data.steps
         }
 
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
@@ -173,7 +325,7 @@ class ClockWallpaperService : WallpaperService() {
         // ------------------- VREME (Open-Meteo, fără cheie API) -------------------
         private fun maybeFetchWeather() {
             val now = System.currentTimeMillis()
-            if (now - lastWeatherFetch < 30 * 60 * 1000L && data.tempNow != null) return
+            if (now - lastWeatherFetch < 20 * 60 * 1000L && data.tempNow != null) return
             lastWeatherFetch = now
             val lat = prefs.getString(MainActivity.KEY_LAT, "44.4268") ?: "44.4268"
             val lon = prefs.getString(MainActivity.KEY_LON, "26.1025") ?: "26.1025"
@@ -182,7 +334,8 @@ class ClockWallpaperService : WallpaperService() {
                     val url = URL(
                         "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon" +
                                 "&current=temperature_2m,weather_code" +
-                                "&daily=temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=1"
+                                "&hourly=temperature_2m,weather_code,precipitation_probability,precipitation" +
+                                "&daily=temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=2"
                     )
                     val con = url.openConnection() as HttpURLConnection
                     con.connectTimeout = 8000; con.readTimeout = 8000
@@ -193,7 +346,46 @@ class ClockWallpaperService : WallpaperService() {
                     val daily = js.getJSONObject("daily")
                     val code = cur.getInt("weather_code")
                     val (icon, desc) = weatherFor(code)
+
+                    // ---- prognoză 3 ore + alertă precipitații în următoarea oră ----
+                    val fc = mutableListOf<String>()
+                    var alert = ""
+                    val hourly = js.optJSONObject("hourly")
+                    if (hourly != null) {
+                        val times = hourly.getJSONArray("time")
+                        val ht = hourly.getJSONArray("temperature_2m")
+                        val hc = hourly.getJSONArray("weather_code")
+                        val hp = hourly.optJSONArray("precipitation_probability")
+                        val hmm = hourly.optJSONArray("precipitation")
+                        val curHour = cur.getString("time").take(13)
+                        var idx = -1
+                        for (i in 0 until times.length()) if (times.getString(i).startsWith(curHour)) { idx = i; break }
+                        if (idx >= 0) {
+                            for (k in 1..3) {
+                                val i = idx + k
+                                if (i >= times.length()) break
+                                val hh = times.getString(i).substring(11, 13).toInt()
+                                fc.add("${hh}h ${weatherFor(hc.getInt(i)).first}${ht.getDouble(i).roundToInt()}°")
+                            }
+                            if (!isPrecip(code)) {
+                                for (k in 0..1) {
+                                    val i = idx + k
+                                    if (i >= times.length()) break
+                                    val prob = hp?.optInt(i, 0) ?: 0
+                                    val mm = hmm?.optDouble(i, 0.0) ?: 0.0
+                                    if (prob >= 50 || mm >= 0.3) {
+                                        val what = if (isSnow(hc.getInt(i))) "Ninsoare" else "Ploaie"
+                                        val whenTxt = if (k == 0) "curând" else "~" + times.getString(i).substring(11, 16)
+                                        alert = "$what $whenTxt · $prob%"
+                                        break
+                                    }
+                                }
+                            }
+                        }
+                    }
                     handler.post {
+                        data.forecast = fc
+                        data.rainAlert = alert
                         data.tempNow = cur.getDouble("temperature_2m").roundToInt()
                         data.tempMax = daily.getJSONArray("temperature_2m_max").getDouble(0).roundToInt()
                         data.tempMin = daily.getJSONArray("temperature_2m_min").getDouble(0).roundToInt()
@@ -205,6 +397,9 @@ class ClockWallpaperService : WallpaperService() {
                 }
             }
         }
+
+        private fun isSnow(code: Int) = code in 71..77 || code == 85 || code == 86
+        private fun isPrecip(code: Int) = code in 51..67 || code in 71..77 || code in 80..86 || code in 95..99
 
         private fun weatherFor(code: Int): Pair<String, String> = when (code) {
             0 -> "☀" to "Senin"
