@@ -73,13 +73,56 @@ class MainActivity : Activity() {
         }
     }
 
+    // ------------------- PERMISIUNE PAȘI -------------------
+    private var permAtStart = true
+    private var autoAskedThisSession = false
+
+    private fun stepPermOk(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
+            checkSelfPermission(Manifest.permission.ACTIVITY_RECOGNITION) == PackageManager.PERMISSION_GRANTED
+
+    /** Deschide direct pagina aplicației din Setări (Permisiuni → Activitate fizică). */
+    private fun openAppPermissionSettings() {
+        Toast.makeText(this, "Apasă Permisiuni → Activitate fizică → Permite", Toast.LENGTH_LONG).show()
+        try {
+            startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                android.net.Uri.fromParts("package", packageName, null)))
+        } catch (_: Exception) {
+            startActivity(Intent(android.provider.Settings.ACTION_SETTINGS))
+        }
+    }
+
+    /**
+     * Cere permisiunea cu fereastra Android. Dacă a fost refuzată definitiv
+     * (fereastra nu mai apare), duce direct la setările aplicației.
+     */
+    private fun requestStepPermission() {
+        if (stepPermOk()) {
+            Toast.makeText(this, "Permisiunea e deja acordată", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val askedBefore = prefs.getBoolean("perm_asked", false)
+        if (askedBefore && !shouldShowRequestPermissionRationale(Manifest.permission.ACTIVITY_RECOGNITION)) {
+            openAppPermissionSettings()
+        } else {
+            prefs.edit().putBoolean("perm_asked", true).apply()
+            requestPermissions(arrayOf(Manifest.permission.ACTIVITY_RECOGNITION), 1)
+        }
+    }
+
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
             Toast.makeText(this, "Permisiune acordată — pașii se vor afișa pe ceas", Toast.LENGTH_SHORT).show()
+            permAtStart = true
             recreate()
         } else if (grantResults.isNotEmpty()) {
-            Toast.makeText(this, "Fără permisiune pașii nu pot fi numărați. O poți da din Setări → Aplicații → MVA Clock Wallpaper → Permisiuni.", Toast.LENGTH_LONG).show()
+            if (!shouldShowRequestPermissionRationale(Manifest.permission.ACTIVITY_RECOGNITION)) {
+                openAppPermissionSettings()   // refuz definitiv → direct în Setări
+            } else {
+                Toast.makeText(this, "Fără permisiune pașii nu pot fi numărați.", Toast.LENGTH_LONG).show()
+            }
         }
     }
 
@@ -179,6 +222,17 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        // revenit din Setări cu permisiunea acordată → reîmprospătăm ecranul
+        if (!permAtStart && stepPermOk()) { permAtStart = true; recreate(); return }
+        // la deschiderea aplicației fără permisiune, o cerem automat (o dată pe sesiune)
+        if (!stepPermOk() && !autoAskedThisSession) {
+            autoAskedThisSession = true
+            val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            if (!prefs.getBoolean("perm_asked", false) ||
+                shouldShowRequestPermissionRationale(Manifest.permission.ACTIVITY_RECOGNITION)) {
+                requestStepPermission()
+            }
+        }
         histView?.invalidate()   // graficele se actualizează la revenirea în aplicație
         hourView?.invalidate()
     }
@@ -382,9 +436,14 @@ class MainActivity : Activity() {
             val ok = hasSensor && permOk
             root.addView(label(
                 "Senzor pași: " + (if (hasSensor) "există ✔" else "NU există ✖") +
-                        "   ·   Permisiune: " + (if (permOk) "acordată ✔" else "NEACORDATĂ ✖ (apasă „Permite numărarea pașilor”)"),
+                        "   ·   Permisiune: " + (if (permOk) "acordată ✔" else "NEACORDATĂ ✖"),
                 13f, if (ok) "#86EFAC" else "#FFB74D"
             ))
+            permAtStart = permOk
+            if (!permOk) {
+                root.addView(button("Acordă permisiunea pentru pași") { requestStepPermission() })
+                root.addView(button("Deschide setările de permisiuni") { openAppPermissionSettings() })
+            }
         }
         val stepLabel = label("Lungime pas: ${prefs.getInt(KEY_STEP_CM, 70)} cm  (km stânga / metri dreapta)")
         root.addView(stepLabel)
@@ -535,15 +594,7 @@ class MainActivity : Activity() {
 
         root.addView(button("Încarcă setările salvate") { loadSnapshot() })
 
-        root.addView(button("Permite numărarea pașilor") {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
-                checkSelfPermission(Manifest.permission.ACTIVITY_RECOGNITION) != PackageManager.PERMISSION_GRANTED
-            ) {
-                requestPermissions(arrayOf(Manifest.permission.ACTIVITY_RECOGNITION), 1)
-            } else {
-                Toast.makeText(this, "Permisiunea e deja acordată", Toast.LENGTH_SHORT).show()
-            }
-        })
+        root.addView(button("Permite numărarea pașilor") { requestStepPermission() })
 
         root.addView(button("Setează ca wallpaper") {
             try {

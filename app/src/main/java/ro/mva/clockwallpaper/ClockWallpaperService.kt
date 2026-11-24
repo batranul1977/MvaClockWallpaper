@@ -380,8 +380,12 @@ class ClockWallpaperService : WallpaperService() {
             val savedDay = prefs.getString("steps_day", "")
             var base = prefs.getLong("steps_base", -1L)
             // zi nouă sau repornire telefon (contorul se resetează) => bază nouă
-            if (savedDay != today || base < 0 || total < base) {
-                base = if (savedDay == today && total < base) 0L else total
+            val hasBase = prefs.contains("steps_base")
+            if (savedDay != today || !hasBase || total < base) {
+                // repornire în aceeași zi: contorul a luat-o de la 0 → continuăm de la pașii deja numărați azi
+                base = if (savedDay == today && hasBase && total < base)
+                    total - prefs.getInt("hist_$today", 0).toLong()
+                else total
                 prefs.edit().putString("steps_day", today).putLong("steps_base", base).apply()
             }
             data.steps = (total - base).toInt()

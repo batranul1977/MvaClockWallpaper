@@ -1,6 +1,6 @@
 # MVA Clock Wallpaper — Ajutor
 
-**Versiunea 1.8** · wallpaper animat (live wallpaper) cu ceas analogic în stil Huawei/Honor, pentru telefoane Android (testat pe Samsung, One UI).
+**Versiunea 1.8.1** · wallpaper animat (live wallpaper) cu ceas analogic în stil Huawei/Honor, pentru telefoane Android (testat pe Samsung, One UI).
 
 ---
 
@@ -17,7 +17,7 @@
 
 ## 1. Instalare și pornire
 
-1. Instalează APK-ul (`MvaClockWallpaper 1.8.apk`) pe telefon. Dacă telefonul cere, permite instalarea din surse necunoscute pentru aplicația cu care ai deschis fișierul.
+1. Instalează APK-ul (`MvaClockWallpaper 1.8.1.apk`) pe telefon. Dacă telefonul cere, permite instalarea din surse necunoscute pentru aplicația cu care ai deschis fișierul.
 2. Deschide **MVA Clock Wallpaper**.
 3. Apasă **„Permite numărarea pașilor”** și acceptă permisiunea *Activitate fizică*.
 4. Completează **Oraș**, **Latitudine**, **Longitudine** (implicit București: 44.4268 / 26.1025) și apasă **„Salvează setările”**.
@@ -38,7 +38,7 @@
 | **Alertă precipitații** | Dacă în următoarea oră vine ploaie/ninsoare, în locul descrierii vremii apare cu portocaliu, ex. `☔ Ploaie ~10:00 · 70%` |
 | **Stânga** | Ziua săptămânii (caseta roșie, ex. `MA`) și data completă `24.11.2026` |
 | **Dreapta** | Baterie (%), ⚡ la încărcare, ora și secundele în casete, bara de baterie (roșie sub 15%). La încărcare, bara are o **reflexie animată** și un contur verde care pulsează |
-| **Jos – mijloc** | 🏃 **Pași azi**; eticheta alternează la 5 s cu 🔥 **calorii (kcal)** |
+| **Jos – mijloc** | 🏃 **Pași azi**; eticheta alternează la 5 s cu 🔥 **calorii (kcal)**. Dacă lipsește permisiunea, apare cu portocaliu **„fără permisiune”** |
 | **Jos – stânga / dreapta** | Distanța: **km** în stânga, **metri** în dreapta |
 | **Jos – bara subțire** | Progresul spre **obiectivul zilnic** de pași; devine **verde** când l-ai atins |
 
@@ -78,6 +78,7 @@
 - **Mod „doar ceas”** — ascunde vremea, pașii, bateria, data, luna și alarma; rămân acele, cifrele și ora digitală.
 
 ### Pași, distanță, calorii
+- **Rândul de verificare** de sub titlu arată starea pașilor, ex. *„Senzor pași: există ✔ · Permisiune: acordată ✔”* — verde = totul e în regulă, portocaliu = lipsește ceva.
 - **Lungime pas** (40–100 cm, implicit 70). Sfat: înălțimea × 0,415 (ex. 175 cm → ~73 cm).
 - **Obiectiv zilnic** (1.000–20.000 pași, implicit 6.000).
 - **Greutate** (40–150 kg, implicit 80) — pentru calcul kcal.
@@ -107,7 +108,7 @@
 - **Istoric pași — ultimele 7 zile**: bare pe zile (verde = obiectiv atins), linia portocalie punctată = obiectivul, sub fiecare zi km parcurși.
 - **Pași pe oră — azi**: 24 de bare (0–23), cea mai activă oră evidențiată, totalul zilei.
 
-> Pașii sunt citiți de wallpaper când ecranul e aprins. Pașii făcuți cu ecranul stins nu se pierd, dar în graficul pe ore apar la ora la care te uiți prima dată la telefon. Istoricul mai vechi de 60 de zile se șterge automat.
+> Senzorul de pași funcționează și cu ecranul stins (consum foarte mic). Valorile ajung în aplicație când telefonul se „trezește”, așa că în graficul pe ore unii pași pot apărea la ora următoare celei în care i-ai făcut. Istoricul mai vechi de 60 de zile se șterge automat.
 
 ---
 
@@ -127,8 +128,8 @@
 | Problemă | Soluție |
 |---|---|
 | **La atingere dublă ecranul se stinge** | E funcția Samsung „Atingeți de 2 ori pentru a opri ecranul”. Folosește modul **„O atingere pe zona vremii”** sau dezactivează funcția: *Setări → Funcții avansate → Mișcări și gesturi*. Pe unele versiuni: ții apăsat pe ecranul de pornire → *Setări*. |
-| **Pașii arată `--`** | Apasă „Permite numărarea pașilor” sau: *Setări telefon → Aplicații → MVA Clock Wallpaper → Permisiuni → Activitate fizică → Permite*. |
-| **Pașii par mai puțini decât în Samsung Health** | Numărătoarea pornește de la prima afișare a wallpaper-ului din ziua respectivă; după o repornire a telefonului contorul senzorului se resetează. |
+| **Pașii arată `--` sau „fără permisiune”** | Deschide aplicația și verifică rândul de la *Pași & distanță*. Dacă scrie *NEACORDATĂ*, apasă „Permite numărarea pașilor” sau: *Setări telefon → Aplicații → MVA Clock Wallpaper → Permisiuni → Activitate fizică → Permite*. Apoi fă câțiva pași. `--` apare doar până la prima valoare primită de la senzor în ziua respectivă. |
+| **Pașii par mai puțini decât în Samsung Health** | Pașii se numără de la miezul nopții, din momentul în care senzorul a trimis prima valoare. În ziua instalării/actualizării se pierd pașii făcuți înainte. Samsung Health poate număra și pașii de la ceasul inteligent sau din alte surse. După o repornire a telefonului, pașii de până atunci se păstrează, iar numărătoarea continuă. |
 | **Vremea „se încarcă…” mult timp** | Verifică internetul și coordonatele (cu punct: `44.4268`). Vremea se reîncearcă la următoarea afișare a ecranului. |
 | **Nu apare alarma** | Apare doar dacă ai o alarmă activă în aplicația Ceas. Se verifică la 30 de secunde. |
 | **Lupa nu reacționează** | Atinge o zonă a ceasului fără iconițe deasupra; verifică bifa „Lupă” în setări. |
