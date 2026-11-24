@@ -38,3 +38,14 @@ baterie, pași de azi și vremea (Open-Meteo, fără cheie API).
 - **Teme**: Albastru, Auriu, Verde, Roșu, Mov
 - **Prognoză 3 ore** (alternează cu orașul) + **alertă ploaie/ninsoare** în următoarea oră
 - **Istoric pași 7 zile** (grafic în aplicație, cu km pe zi)
+
+## Noutăți v1.3 – v1.6
+- Atingere dublă → opțiunea „🌤 Vremea" (Samsung/Google sau prognoza în browser)
+- Lupa: o atingere mărește pentru X secunde (1–15), a doua atingere revine imediat
+- Data completă: 24.11.2026
+- Răsărit/apus (alternează la 5 s cu orașul și prognoza)
+- Faza lunii + următoarea alarmă (între 12 și vreme)
+- Animație pe bara de baterie la încărcare
+- Grafic „Pași pe oră — azi" în aplicație
+- Mod „doar ceas" (fără complicații)
+- Salvare / restaurare setări în fișier JSON

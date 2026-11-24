@@ -57,6 +57,8 @@ class ClockWallpaperService : WallpaperService() {
         private var lastTapX = 0f
         private var lastTapY = 0f
         private var lastSavedSteps = -1
+        private var lastCleanDay = ""
+        private var lastAlarmCheck = 0L
 
         private val prefs by lazy { getSharedPreferences(MainActivity.PREFS, Context.MODE_PRIVATE) }
         private val sensorManager by lazy { getSystemService(Context.SENSOR_SERVICE) as SensorManager }
@@ -259,6 +261,11 @@ class ClockWallpaperService : WallpaperService() {
         private fun drawFrame() {
             if (width == 0 || height == 0) return
             stepZoom()
+            val nowMs = System.currentTimeMillis()
+            if (nowMs - lastAlarmCheck > 30_000L) {
+                lastAlarmCheck = nowMs
+                data.nextAlarm = nextAlarmText()
+            }
             val holder = surfaceHolder
             val canvas = try { holder.lockHardwareCanvas() } catch (_: Exception) { null }
                 ?: try { holder.lockCanvas() } catch (_: Exception) { null }
@@ -279,7 +286,8 @@ class ClockWallpaperService : WallpaperService() {
                     theme = prefs.getInt(MainActivity.KEY_THEME, 0),
                     night = isNight() && zoomCur <= 1.001f,   // la lupă arătăm normal
                     goal = prefs.getInt(MainActivity.KEY_GOAL, 6000),
-                    weightKg = prefs.getInt(MainActivity.KEY_WEIGHT, 80)
+                    weightKg = prefs.getInt(MainActivity.KEY_WEIGHT, 80),
+                    minimal = prefs.getBoolean(MainActivity.KEY_MINIMAL, false)
                 )
             } finally {
                 try { holder.unlockCanvasAndPost(canvas) } catch (_: Exception) {}
@@ -341,8 +349,34 @@ class ClockWallpaperService : WallpaperService() {
             if (data.steps < 0) return
             if (!force && lastSavedSteps >= 0 && abs(data.steps - lastSavedSteps) < 10) return
             val day = prefs.getString("steps_day", null) ?: return
-            prefs.edit().putInt("hist_$day", data.steps).apply()
+            val hh = SimpleDateFormat("HH", Locale.US).format(Date())
+            val ed = prefs.edit()
+                .putInt("hist_$day", data.steps)
+                .putInt("hcum_${day}_$hh", data.steps)   // total cumulat la ora respectivă (grafic pe ore)
+            if (day != lastCleanDay) {
+                // curățenie o dată pe zi: orele din zilele trecute + istoric mai vechi de 60 de zile
+                lastCleanDay = day
+                val cut = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -60) }
+                val cutStr = SimpleDateFormat("yyyyMMdd", Locale.US).format(cut.time)
+                for (k in prefs.all.keys) {
+                    if (k.startsWith("hcum_") && !k.startsWith("hcum_${day}_")) ed.remove(k)
+                    if (k.startsWith("hist_") && k.length == 13 && k.substring(5) < cutStr) ed.remove(k)
+                }
+            }
+            ed.apply()
             lastSavedSteps = data.steps
+        }
+
+        /** Următoarea alarmă setată în telefon: "06:30" (în 24 h) sau "Jo 06:30". */
+        private fun nextAlarmText(): String {
+            return try {
+                val am = getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
+                val t = am.nextAlarmClock?.triggerTime ?: return ""
+                val cal = Calendar.getInstance().apply { timeInMillis = t }
+                val hm = String.format(Locale.US, "%02d:%02d", cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE))
+                if (t - System.currentTimeMillis() < 24 * 3600_000L) hm
+                else arrayOf("", "Du", "Lu", "Ma", "Mi", "Jo", "Vi", "Sâ")[cal.get(Calendar.DAY_OF_WEEK)] + " " + hm
+            } catch (_: Exception) { "" }
         }
 
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
@@ -360,7 +394,7 @@ class ClockWallpaperService : WallpaperService() {
                         "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon" +
                                 "&current=temperature_2m,weather_code" +
                                 "&hourly=temperature_2m,weather_code,precipitation_probability,precipitation" +
-                                "&daily=temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=2"
+                                "&daily=temperature_2m_max,temperature_2m_min,sunrise,sunset&timezone=auto&forecast_days=2"
                     )
                     val con = url.openConnection() as HttpURLConnection
                     con.connectTimeout = 8000; con.readTimeout = 8000
@@ -411,6 +445,8 @@ class ClockWallpaperService : WallpaperService() {
                     handler.post {
                         data.forecast = fc
                         data.rainAlert = alert
+                        data.sunrise = daily.optJSONArray("sunrise")?.optString(0, "")?.let { if (it.length >= 16) it.substring(11, 16) else "" } ?: ""
+                        data.sunset = daily.optJSONArray("sunset")?.optString(0, "")?.let { if (it.length >= 16) it.substring(11, 16) else "" } ?: ""
                         data.tempNow = cur.getDouble("temperature_2m").roundToInt()
                         data.tempMax = daily.getJSONArray("temperature_2m_max").getDouble(0).roundToInt()
                         data.tempMin = daily.getJSONArray("temperature_2m_min").getDouble(0).roundToInt()

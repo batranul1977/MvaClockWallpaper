@@ -44,10 +44,21 @@ class MainActivity : Activity() {
         const val KEY_TAP_APP = "tap_app"
         const val TAP_WEATHER = "__weather__"
         const val REQ_IMAGE = 42
+        const val REQ_EXPORT = 43
+        const val REQ_IMPORT = 44
+        const val KEY_MINIMAL = "minimal"
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQ_EXPORT && resultCode == RESULT_OK) {
+            data?.data?.let { exportPrefs(it) }
+            return
+        }
+        if (requestCode == REQ_IMPORT && resultCode == RESULT_OK) {
+            data?.data?.let { importPrefs(it) }
+            return
+        }
         if (requestCode == REQ_IMAGE && resultCode == RESULT_OK) {
             val uri = data?.data ?: return
             try {
@@ -61,11 +72,62 @@ class MainActivity : Activity() {
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
+    /** Salvează setările + istoricul pe zile într-un fișier JSON ales de utilizator. */
+    private fun exportPrefs(uri: android.net.Uri) {
+        try {
+            val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val js = org.json.JSONObject()
+            for ((k, v) in prefs.all) {
+                // fundalul (permisiunea nu supraviețuiește reinstalării) și contoarele interne nu se exportă
+                if (k == KEY_BG || k.startsWith("steps_") || k.startsWith("hcum_")) continue
+                val o = org.json.JSONObject()
+                when (v) {
+                    is Int -> o.put("t", "i").put("v", v)
+                    is Long -> o.put("t", "l").put("v", v)
+                    is Float -> o.put("t", "f").put("v", v.toDouble())
+                    is Boolean -> o.put("t", "b").put("v", v)
+                    is String -> o.put("t", "s").put("v", v)
+                    else -> continue
+                }
+                js.put(k, o)
+            }
+            contentResolver.openOutputStream(uri, "wt")?.use { it.write(js.toString(2).toByteArray()) }
+            Toast.makeText(this, "Setări salvate (${js.length()} valori)", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "Eroare la salvare: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun importPrefs(uri: android.net.Uri) {
+        try {
+            val txt = contentResolver.openInputStream(uri)?.use { it.bufferedReader().readText() } ?: return
+            val js = org.json.JSONObject(txt)
+            val ed = getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            for (k in js.keys()) {
+                val o = js.getJSONObject(k)
+                when (o.getString("t")) {
+                    "i" -> ed.putInt(k, o.getInt("v"))
+                    "l" -> ed.putLong(k, o.getLong("v"))
+                    "f" -> ed.putFloat(k, o.getDouble("v").toFloat())
+                    "b" -> ed.putBoolean(k, o.getBoolean("v"))
+                    "s" -> ed.putString(k, o.getString("v"))
+                }
+            }
+            ed.apply()
+            Toast.makeText(this, "Setări restaurate", Toast.LENGTH_SHORT).show()
+            recreate()
+        } catch (e: Exception) {
+            Toast.makeText(this, "Fișier invalid: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
     private var histView: StepHistoryView? = null
+    private var hourView: HourlyStepsView? = null
 
     override fun onResume() {
         super.onResume()
-        histView?.invalidate()   // graficul se actualizează la revenirea în aplicație
+        histView?.invalidate()   // graficele se actualizează la revenirea în aplicație
+        hourView?.invalidate()
     }
 
     private fun appName(pkg: String): String {
@@ -148,6 +210,13 @@ class MainActivity : Activity() {
         root.addView(section("ISTORIC PAȘI — ULTIMELE 7 ZILE"))
         histView = StepHistoryView(this)
         root.addView(histView)
+
+        root.addView(section("PAȘI PE ORĂ — AZI"))
+        hourView = HourlyStepsView(this)
+        root.addView(hourView)
+
+        root.addView(section("AFIȘARE"))
+        root.addView(check("Mod „doar ceas” (ascunde vremea, pașii, bateria, luna, alarma)", KEY_MINIMAL, false))
 
         root.addView(label("Oraș (afișat sub vreme)"))
         val city = field(prefs.getString(KEY_CITY, "București")!!, false); root.addView(city)
@@ -347,6 +416,24 @@ class MainActivity : Activity() {
                 }
                 .show()
         })
+
+        // ---- Salvare / restaurare ----
+        root.addView(section("SALVARE / RESTAURARE SETĂRI"))
+        root.addView(button("Salvează setările într-un fișier") {
+            val stamp = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
+            startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "application/json"
+                putExtra(Intent.EXTRA_TITLE, "MvaClock_setari_$stamp.json")
+            }, REQ_EXPORT)
+        })
+        root.addView(button("Restaurează setările din fișier") {
+            startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "*/*"
+            }, REQ_IMPORT)
+        })
+        root.addView(label("Imaginea de fundal trebuie aleasă din nou după reinstalare.", 12f))
 
         root.addView(button("Salvează setările") {
             prefs.edit()

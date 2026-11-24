@@ -17,7 +17,10 @@ data class ClockData(
     var weatherIcon: String = "",
     var city: String = "București",
     var forecast: List<String> = emptyList(),   // următoarele 3 ore, ex. "10h ☁3°"
-    var rainAlert: String = ""                  // ex. "Ploaie ~10:00 · 70%"
+    var rainAlert: String = "",                 // ex. "Ploaie ~10:00 · 70%"
+    var sunrise: String = "",                   // ex. "07:28"
+    var sunset: String = "",                    // ex. "16:42"
+    var nextAlarm: String = ""                  // ex. "06:30" sau "Jo 06:30"
 )
 
 /** Teme de culoare: principal, deschis, închis, culoare stele (r,g,b). */
@@ -91,7 +94,8 @@ class ClockRenderer {
         scale: Float = 1f, posY: Float = 0.56f, showDigital: Boolean = true,
         background: Bitmap? = null, dim: Float = 0.4f, plate: Boolean = true,
         stepLenCm: Int = 70, zoom: Float = 1f,
-        theme: Int = 0, night: Boolean = false, goal: Int = 6000, weightKg: Int = 80
+        theme: Int = 0, night: Boolean = false, goal: Int = 6000, weightKg: Int = 80,
+        minimal: Boolean = false
     ) {
         applyTheme(theme)
         ensureStars(w, h)
@@ -210,7 +214,18 @@ class ClockRenderer {
             c.drawText(n.toString(), x, y, tp)
         }
 
-        // ---------- Complicații ----------
+        // ---------- Complicații (ascunse în modul „doar ceas") ----------
+        if (!minimal) {
+        // Faza lunii + următoarea alarmă, între 12 și vreme
+        val hasAlarm = data.nextAlarm.isNotEmpty()
+        drawMoon(c, if (hasAlarm) cx - r * 0.13f else cx, cy - r * 0.585f, r * 0.035f, timeMs)
+        if (hasAlarm) {
+            tp.typeface = medium
+            tp.textSize = r * 0.05f
+            tp.color = Color.parseColor("#C8D3EA")
+            c.drawText("⏰ ${data.nextAlarm}", cx + r * 0.11f, cy - r * 0.567f, tp)
+        }
+
         // Sus: vreme
         tp.typeface = medium
         tp.textSize = r * 0.075f
@@ -228,10 +243,14 @@ class ClockRenderer {
             p.style = Paint.Style.STROKE; p.color = grey; p.strokeWidth = 1.5f
             c.drawLine(cx - r * 0.22f, cy - r * 0.27f, cx + r * 0.22f, cy - r * 0.27f, p)
             tp.textSize = r * 0.06f; tp.color = grey
-            if (phaseB && data.forecast.isNotEmpty()) {
-                // prognoza pe următoarele 3 ore, alternând cu numele orașului
+            // la fiecare 5 s: oraș → prognoză 3 ore → răsărit/apus
+            val phase3 = ((timeMs / 5000L) % 3L).toInt()
+            if (phase3 == 1 && data.forecast.isNotEmpty()) {
                 tp.textSize = r * 0.05f; tp.color = Color.parseColor("#C8D3EA")
                 c.drawText(data.forecast.joinToString("   "), cx, cy - r * 0.19f, tp)
+            } else if (phase3 == 2 && data.sunrise.isNotEmpty()) {
+                tp.textSize = r * 0.055f; tp.color = Color.parseColor("#FFD27A")
+                c.drawText("☀↑ ${data.sunrise}    ☀↓ ${data.sunset}", cx, cy - r * 0.19f, tp)
             } else {
                 c.drawText(data.city, cx, cy - r * 0.19f, tp)
             }
@@ -240,14 +259,17 @@ class ClockRenderer {
             c.drawText("☁  vremea se încarcă…", cx, cy - r * 0.35f, tp)
         }
 
-        // Stânga: zi săptămână (roșu) + lună-zi
-        val lx = cx - r * 0.38f
-        drawBox(c, lx - r * 0.13f, cy, r * 0.10f, r * 0.10f, zileScurt[dow], red, Color.WHITE, r)
-        drawBox(
-            c, lx + r * 0.07f, cy, r * 0.20f, r * 0.10f,
-            String.format("%02d-%02d", cal.get(Calendar.MONTH) + 1, cal.get(Calendar.DAY_OF_MONTH)),
-            blueDark, Color.WHITE, r
+        // Stânga: zi săptămână (roșu) + data completă zz.ll.aaaa
+        val dateTxt = String.format(
+            "%02d.%02d.%04d",
+            cal.get(Calendar.DAY_OF_MONTH), cal.get(Calendar.MONTH) + 1, cal.get(Calendar.YEAR)
         )
+        tp.typeface = medium
+        tp.textSize = r * 0.10f * 0.62f          // aceeași mărime ca în drawBox
+        val dw = tp.measureText(dateTxt) + r * 0.04f
+        val dRight = cx - r * 0.15f               // marginea dreaptă a casetei cu data
+        drawBox(c, dRight - dw / 2f, cy, dw, r * 0.10f, dateTxt, blueDark, Color.WHITE, r)
+        drawBox(c, dRight - dw - r * 0.02f - r * 0.05f, cy, r * 0.10f, r * 0.10f, zileScurt[dow], red, Color.WHITE, r)
 
         // Dreapta: baterie + secunde digitale
         val rx = cx + r * 0.36f
@@ -266,7 +288,30 @@ class ClockRenderer {
             p.style = Paint.Style.FILL; p.color = Color.parseColor("#1B2235")
             c.drawRoundRect(bx, by, bx + bw, by + r * 0.025f, 6f, 6f, p)
             p.color = if (data.battery <= 15) red else blue
-            c.drawRoundRect(bx, by, bx + bw * data.battery / 100f, by + r * 0.025f, 6f, 6f, p)
+            val fillW = bw * data.battery / 100f
+            val bh = r * 0.025f
+            c.drawRoundRect(bx, by, bx + fillW, by + bh, 6f, 6f, p)
+            if (data.charging && !night && fillW > 0f) {
+                // reflexie care alunecă pe bară + pulsare ușoară
+                val t = (timeMs % 1400L) / 1400f
+                val sx = bx + fillW * t
+                p.shader = LinearGradient(
+                    sx - r * 0.07f, 0f, sx + r * 0.07f, 0f,
+                    intArrayOf(Color.TRANSPARENT, Color.argb(210, 255, 255, 255), Color.TRANSPARENT),
+                    null, Shader.TileMode.CLAMP
+                )
+                c.save()
+                c.clipRect(bx, by, bx + fillW, by + bh)
+                c.drawRect(bx, by, bx + fillW, by + bh, p)
+                c.restore()
+                p.shader = null
+                val pulse = (0.5f + 0.5f * sin(timeMs / 300.0).toFloat())
+                p.style = Paint.Style.STROKE
+                p.strokeWidth = r * 0.006f
+                p.color = Color.argb((90 + 120 * pulse).toInt(), Color.red(green), Color.green(green), Color.blue(green))
+                c.drawRoundRect(bx - r * 0.006f, by - r * 0.006f, bx + bw + r * 0.006f, by + bh + r * 0.006f, 8f, 8f, p)
+                p.style = Paint.Style.FILL
+            }
         }
 
         // Jos: pași
@@ -315,6 +360,7 @@ class ClockRenderer {
         p.color = Color.parseColor("#3A4560")
         c.drawLine(cx - r * 0.145f, cy + r * 0.41f, cx - r * 0.145f, cy + r * 0.56f, p)
         c.drawLine(cx + r * 0.145f, cy + r * 0.41f, cx + r * 0.145f, cy + r * 0.56f, p)
+        } // sfârșit complicații
 
         // ---------- Ace ----------
         val secF = if (night) sec.toFloat() else sec + ms / 1000f
@@ -349,6 +395,37 @@ class ClockRenderer {
 
         // mod de noapte: totul mai întunecat
         if (night) c.drawColor(Color.argb(110, 0, 0, 0))
+    }
+
+    /** Faza lunii desenată din dată (lună nouă de referință: 6 ian 2000, 18:14 UTC). */
+    private fun drawMoon(c: Canvas, mx: Float, my: Float, rad: Float, timeMs: Long) {
+        val syn = 29.530588853
+        var f = ((timeMs - 947182440000L) / 86400000.0 / syn) % 1.0
+        if (f < 0) f += 1.0
+        p.shader = null
+        p.style = Paint.Style.FILL
+        p.color = Color.parseColor("#2A3245")
+        c.drawCircle(mx, my, rad, p)
+        val k = cos(2.0 * PI * f).toFloat()       // 1 = lună nouă, -1 = lună plină
+        val circle = RectF(mx - rad, my - rad, mx + rad, my + rad)
+        val ell = RectF(mx - abs(k) * rad, my - rad, mx + abs(k) * rad, my + rad)
+        val path = Path()
+        path.moveTo(mx, my - rad)
+        if (f < 0.5) {             // crește: partea dreaptă luminată
+            path.arcTo(circle, -90f, 180f)
+            path.arcTo(ell, 90f, if (k > 0) -180f else 180f)
+        } else {                   // descrește: partea stângă luminată
+            path.arcTo(circle, -90f, -180f)
+            path.arcTo(ell, 90f, if (k > 0) 180f else -180f)
+        }
+        path.close()
+        p.color = Color.parseColor("#F2EBC8")
+        c.drawPath(path, p)
+        p.style = Paint.Style.STROKE
+        p.strokeWidth = rad * 0.08f
+        p.color = Color.parseColor("#55F2EBC8")
+        c.drawCircle(mx, my, rad, p)
+        p.style = Paint.Style.FILL
     }
 
     /** Ac tip "sabie" — contur alb, interior albastru, ca în cadranul original. */
