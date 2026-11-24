@@ -75,26 +75,77 @@ class MainActivity : Activity() {
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
+    /** Copia internă cu ultimele setări salvate (folosită de „Încarcă setările salvate"). */
+    private val snapshotFile get() = java.io.File(filesDir, "setari_salvate.json")
+
+    /** Setările + istoricul pe zile ca JSON (fără fundal și contoare interne). */
+    private fun prefsToJson(): org.json.JSONObject {
+        val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val js = org.json.JSONObject()
+        for ((k, v) in prefs.all) {
+            if (k == KEY_BG || k.startsWith("steps_") || k.startsWith("hcum_")) continue
+            val o = org.json.JSONObject()
+            when (v) {
+                is Int -> o.put("t", "i").put("v", v)
+                is Long -> o.put("t", "l").put("v", v)
+                is Float -> o.put("t", "f").put("v", v.toDouble())
+                is Boolean -> o.put("t", "b").put("v", v)
+                is String -> o.put("t", "s").put("v", v)
+                else -> continue
+            }
+            js.put(k, o)
+        }
+        return js
+    }
+
+    private fun applyJson(txt: String) {
+        val js = org.json.JSONObject(txt)
+        val ed = getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+        for (k in js.keys()) {
+            val o = js.getJSONObject(k)
+            when (o.getString("t")) {
+                "i" -> ed.putInt(k, o.getInt("v"))
+                "l" -> ed.putLong(k, o.getLong("v"))
+                "f" -> ed.putFloat(k, o.getDouble("v").toFloat())
+                "b" -> ed.putBoolean(k, o.getBoolean("v"))
+                "s" -> ed.putString(k, o.getString("v"))
+            }
+        }
+        ed.commit()
+    }
+
+    /** Salvează o copie internă a setărilor curente. */
+    private fun saveSnapshot(): Boolean = try {
+        snapshotFile.writeText(prefsToJson().toString(2)); true
+    } catch (_: Exception) { false }
+
+    /** Încarcă ultimele setări salvate; dacă nu există copie internă, deschide alegerea unui fișier. */
+    private fun loadSnapshot() {
+        if (!snapshotFile.exists()) {
+            Toast.makeText(this, "Nu există setări salvate în aplicație — alege un fișier", Toast.LENGTH_LONG).show()
+            startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "*/*"
+            }, REQ_IMPORT)
+            return
+        }
+        try {
+            applyJson(snapshotFile.readText())
+            val whenTxt = java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", java.util.Locale.US)
+                .format(java.util.Date(snapshotFile.lastModified()))
+            Toast.makeText(this, "Setări încărcate (salvate la $whenTxt)", Toast.LENGTH_SHORT).show()
+            recreate()
+        } catch (e: Exception) {
+            Toast.makeText(this, "Eroare la încărcare: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
     /** Salvează setările + istoricul pe zile într-un fișier JSON ales de utilizator. */
     private fun exportPrefs(uri: android.net.Uri) {
         try {
-            val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            val js = org.json.JSONObject()
-            for ((k, v) in prefs.all) {
-                // fundalul (permisiunea nu supraviețuiește reinstalării) și contoarele interne nu se exportă
-                if (k == KEY_BG || k.startsWith("steps_") || k.startsWith("hcum_")) continue
-                val o = org.json.JSONObject()
-                when (v) {
-                    is Int -> o.put("t", "i").put("v", v)
-                    is Long -> o.put("t", "l").put("v", v)
-                    is Float -> o.put("t", "f").put("v", v.toDouble())
-                    is Boolean -> o.put("t", "b").put("v", v)
-                    is String -> o.put("t", "s").put("v", v)
-                    else -> continue
-                }
-                js.put(k, o)
-            }
+            val js = prefsToJson()
             contentResolver.openOutputStream(uri, "wt")?.use { it.write(js.toString(2).toByteArray()) }
+            saveSnapshot()
             Toast.makeText(this, "Setări salvate (${js.length()} valori)", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             Toast.makeText(this, "Eroare la salvare: ${e.message}", Toast.LENGTH_LONG).show()
@@ -104,19 +155,8 @@ class MainActivity : Activity() {
     private fun importPrefs(uri: android.net.Uri) {
         try {
             val txt = contentResolver.openInputStream(uri)?.use { it.bufferedReader().readText() } ?: return
-            val js = org.json.JSONObject(txt)
-            val ed = getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            for (k in js.keys()) {
-                val o = js.getJSONObject(k)
-                when (o.getString("t")) {
-                    "i" -> ed.putInt(k, o.getInt("v"))
-                    "l" -> ed.putLong(k, o.getLong("v"))
-                    "f" -> ed.putFloat(k, o.getDouble("v").toFloat())
-                    "b" -> ed.putBoolean(k, o.getBoolean("v"))
-                    "s" -> ed.putString(k, o.getString("v"))
-                }
-            }
-            ed.apply()
+            applyJson(txt)
+            saveSnapshot()
             Toast.makeText(this, "Setări restaurate", Toast.LENGTH_SHORT).show()
             recreate()
         } catch (e: Exception) {
@@ -442,6 +482,8 @@ class MainActivity : Activity() {
 
         // ---- Salvare / restaurare ----
         root.addView(section("SALVARE / RESTAURARE SETĂRI"))
+        root.addView(label("„Salvează setările” (jos) păstrează o copie în aplicație; „Încarcă setările salvate” o readuce. " +
+                "Fișierul de mai jos e pentru reinstalare sau alt telefon.", 12f))
         root.addView(button("Salvează setările într-un fișier") {
             val stamp = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
             startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
@@ -464,9 +506,12 @@ class MainActivity : Activity() {
                 .putString(KEY_LAT, lat.text.toString().trim().replace(',', '.'))
                 .putString(KEY_LON, lon.text.toString().trim().replace(',', '.'))
                 .putInt(KEY_FPS, fps.progress + 1)
-                .apply()
+                .commit()
+            saveSnapshot()
             Toast.makeText(this, "Salvat", Toast.LENGTH_SHORT).show()
         })
+
+        root.addView(button("Încarcă setările salvate") { loadSnapshot() })
 
         root.addView(button("Permite numărarea pașilor") {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&

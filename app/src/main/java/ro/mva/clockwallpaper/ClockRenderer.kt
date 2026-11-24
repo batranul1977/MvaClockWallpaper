@@ -363,6 +363,10 @@ class ClockRenderer {
         } // sfârșit complicații
 
         // ---------- Ace ----------
+        // La lupă acele dispar lin, ca să nu acopere valorile afișate
+        val handsAlpha = (1f - (zoom - 1f) * 5f).coerceIn(0f, 1f)
+        if (handsAlpha > 0.01f) {
+        val handsLayer = if (handsAlpha < 0.99f) c.saveLayerAlpha(null, (255 * handsAlpha).toInt()) else -1
         val secF = if (night) sec.toFloat() else sec + ms / 1000f
         val minF = minute + secF / 60f
         val hourF = (hour % 12) + minF / 60f
@@ -390,6 +394,8 @@ class ClockRenderer {
         c.drawCircle(cx, cy, r * 0.035f, p)
         p.color = Color.parseColor("#6A7387")
         c.drawCircle(cx, cy, r * 0.016f, p)
+        if (handsLayer >= 0) c.restoreToCount(handsLayer)
+        } // sfârșit ace
 
         c.restore() // sfârșit lupă
 
