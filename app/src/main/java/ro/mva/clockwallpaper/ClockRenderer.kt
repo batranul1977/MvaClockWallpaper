@@ -20,7 +20,8 @@ data class ClockData(
     var rainAlert: String = "",                 // ex. "Ploaie ~10:00 · 70%"
     var sunrise: String = "",                   // ex. "07:28"
     var sunset: String = "",                    // ex. "16:42"
-    var nextAlarm: String = ""                  // ex. "06:30" sau "Jo 06:30"
+    var nextAlarm: String = "",                 // ex. "06:30" sau "Jo 06:30"
+    var stepPermMissing: Boolean = false        // permisiunea „Activitate fizică" lipsește
 )
 
 /** Teme de culoare: principal, deschis, închis, culoare stele (r,g,b). */
@@ -327,6 +328,9 @@ class ClockRenderer {
             val kcal = (data.steps * weightKg * 0.00057).roundToInt()
             tp.color = amber
             c.drawText("🔥 $kcal kcal", cx, cy + r * 0.56f, tp)
+        } else if (data.stepPermMissing) {
+            tp.color = amber
+            c.drawText("fără permisiune", cx, cy + r * 0.56f, tp)
         } else {
             c.drawText("pași azi", cx, cy + r * 0.56f, tp)
         }

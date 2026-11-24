@@ -73,6 +73,16 @@ class MainActivity : Activity() {
         }
     }
 
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            Toast.makeText(this, "Permisiune acordată — pașii se vor afișa pe ceas", Toast.LENGTH_SHORT).show()
+            recreate()
+        } else if (grantResults.isNotEmpty()) {
+            Toast.makeText(this, "Fără permisiune pașii nu pot fi numărați. O poți da din Setări → Aplicații → MVA Clock Wallpaper → Permisiuni.", Toast.LENGTH_LONG).show()
+        }
+    }
+
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
     /** Copia internă cu ultimele setări salvate (folosită de „Încarcă setările salvate"). */
@@ -364,6 +374,18 @@ class MainActivity : Activity() {
 
         // ---- Pași & distanță ----
         root.addView(label("PAȘI & DISTANȚĂ", 15f, "#8FB8FF"))
+        run {
+            val sm = getSystemService(Context.SENSOR_SERVICE) as android.hardware.SensorManager
+            val hasSensor = sm.getDefaultSensor(android.hardware.Sensor.TYPE_STEP_COUNTER) != null
+            val permOk = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
+                    checkSelfPermission(Manifest.permission.ACTIVITY_RECOGNITION) == PackageManager.PERMISSION_GRANTED
+            val ok = hasSensor && permOk
+            root.addView(label(
+                "Senzor pași: " + (if (hasSensor) "există ✔" else "NU există ✖") +
+                        "   ·   Permisiune: " + (if (permOk) "acordată ✔" else "NEACORDATĂ ✖ (apasă „Permite numărarea pașilor”)"),
+                13f, if (ok) "#86EFAC" else "#FFB74D"
+            ))
+        }
         val stepLabel = label("Lungime pas: ${prefs.getInt(KEY_STEP_CM, 70)} cm  (km stânga / metri dreapta)")
         root.addView(stepLabel)
         root.addView(SeekBar(this).apply {

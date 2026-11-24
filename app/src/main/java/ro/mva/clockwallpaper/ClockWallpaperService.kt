@@ -101,6 +101,7 @@ class ClockWallpaperService : WallpaperService() {
             handler.removeCallbacks(drawRunnable)
             try { unregisterReceiver(batteryReceiver) } catch (_: Exception) {}
             sensorManager.unregisterListener(this)
+            stepsRegistered = false
         }
 
         override fun onVisibilityChanged(v: Boolean) {
@@ -114,7 +115,7 @@ class ClockWallpaperService : WallpaperService() {
                 handler.removeCallbacks(zoomOff)
                 zoomTarget = 1f; zoomCur = 1f
                 saveStepHistory(force = true)
-                sensorManager.unregisterListener(this)
+                // senzorul de pași rămâne activ (vezi registerSteps)
             }
         }
 
@@ -336,11 +337,40 @@ class ClockWallpaperService : WallpaperService() {
         }
 
         // ------------------- PAȘI -------------------
+        private var stepsRegistered = false
+
+        private fun hasStepPermission(): Boolean =
+            android.os.Build.VERSION.SDK_INT < 29 ||
+                checkSelfPermission(android.Manifest.permission.ACTIVITY_RECOGNITION) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+
+        /**
+         * Senzorul de pași rămâne înregistrat și cu ecranul stins (consum foarte mic):
+         * valorile se adună în bufferul senzorului și sosesc când se aprinde ecranul.
+         * La fiecare afișare cerem și un „flush", ca valoarea să vină imediat, fără să mai faci un pas.
+         */
         private fun registerSteps() {
+            data.stepPermMissing = !hasStepPermission()
+            if (data.stepPermMissing) return
+            // până sosește prima valoare, afișăm ultimii pași salvați azi (nu „--")
+            if (data.steps < 0) {
+                val today = SimpleDateFormat("yyyyMMdd", Locale.US).format(Date())
+                if (prefs.getString("steps_day", "") == today) {
+                    val saved = prefs.getInt("hist_$today", -1)
+                    if (saved >= 0) data.steps = saved
+                }
+            }
             val s = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER) ?: return
             try {
-                sensorManager.registerListener(this, s, SensorManager.SENSOR_DELAY_NORMAL)
-            } catch (_: SecurityException) { /* permisiunea nu a fost acordată */ }
+                if (!stepsRegistered) {
+                    stepsRegistered = sensorManager.registerListener(
+                        this, s, SensorManager.SENSOR_DELAY_NORMAL, 10_000_000 // max 10 s întârziere
+                    )
+                }
+                if (stepsRegistered) sensorManager.flush(this)
+            } catch (_: SecurityException) {
+                data.stepPermMissing = true
+            }
         }
 
         override fun onSensorChanged(event: SensorEvent) {

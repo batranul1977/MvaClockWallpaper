@@ -1,6 +1,6 @@
 # MVA Clock Wallpaper — Ajutor
 
-**Versiunea 1.7** · wallpaper animat (live wallpaper) cu ceas analogic în stil Huawei/Honor, pentru telefoane Android (testat pe Samsung, One UI).
+**Versiunea 1.8** · wallpaper animat (live wallpaper) cu ceas analogic în stil Huawei/Honor, pentru telefoane Android (testat pe Samsung, One UI).
 
 ---
 
@@ -12,13 +12,12 @@
 5. [Graficele de pași](#5-graficele-de-pași)
 6. [Salvare și restaurare setări](#6-salvare-și-restaurare-setări)
 7. [Probleme frecvente și soluții](#7-probleme-frecvente-și-soluții)
-8. [Actualizare (build APK prin GitHub)](#8-actualizare-build-apk-prin-github)
 
 ---
 
 ## 1. Instalare și pornire
 
-1. Instalează APK-ul (`MvaClockWallpaper 1.7.apk`) pe telefon. Dacă telefonul cere, permite instalarea din surse necunoscute pentru aplicația cu care ai deschis fișierul.
+1. Instalează APK-ul (`MvaClockWallpaper 1.8.apk`) pe telefon. Dacă telefonul cere, permite instalarea din surse necunoscute pentru aplicația cu care ai deschis fișierul.
 2. Deschide **MVA Clock Wallpaper**.
 3. Apasă **„Permite numărarea pașilor”** și acceptă permisiunea *Activitate fizică*.
 4. Completează **Oraș**, **Latitudine**, **Longitudine** (implicit București: 44.4268 / 26.1025) și apasă **„Salvează setările”**.
@@ -54,7 +53,7 @@
 
 | Gest | Efect |
 |---|---|
-| **O atingere scurtă pe ceas** | 🔍 **Lupă**: cadranul se mărește și rămâne mărit câteva secunde (setabil 1–15 s), apoi revine singur |
+| **O atingere scurtă pe ceas** | 🔍 **Lupă**: cadranul se mărește și rămâne mărit câteva secunde (setabil 1–15 s), apoi revine singur. Cât e mărit, **acele (ore, minute, secundar) dispar**, ca să nu acopere valorile afișate |
 | **Încă o atingere cât e mărit** | Revine imediat la mărimea normală |
 | **O atingere pe zona vremii** (sus pe cadran) | Deschide aplicația aleasă — *mod implicit, recomandat pe Samsung* |
 | **Atingere dublă oriunde pe ceas** | Deschide aplicația aleasă — *doar dacă ai ales acest mod în setări* |
@@ -87,6 +86,7 @@
 - **Activare** — o atingere pe ceas îl mărește.
 - **Mărire lupă** (110–200%, implicit 150%).
 - **Cât rămâne mărit** (1–15 secunde, implicit 3).
+- Cât ceasul e mărit, acele se ascund lin și reapar când revine la normal; ora exactă rămâne în casetele din dreapta.
 
 ### Mod economic de noapte
 - Activat implicit, **23:00 → 07:00** (orele se pot schimba).
@@ -113,8 +113,11 @@
 
 ## 6. Salvare și restaurare setări
 
+- **„Salvează setările”** (butonul de jos) — salvează orașul și coordonatele și păstrează **o copie a tuturor setărilor în aplicație**.
+- **„Încarcă setările salvate”** — readuce cu o apăsare setările de la ultima salvare (apare și data/ora salvării). Util dacă ai încercat o temă, o mărime sau un fundal și vrei să revii. Dacă nu există încă o copie, îți deschide alegerea unui fișier `.json`.
 - **„Salvează setările într-un fișier”** — creează `MvaClock_setari_AAAA-LL-ZZ.json` (setări + istoricul pe zile) unde alegi tu (ex. Descărcări, Drive).
 - **„Restaurează setările din fișier”** — încarcă fișierul și repornește ecranul de setări.
+- Copia din aplicație se șterge la dezinstalare — pentru reinstalare sau alt telefon folosește fișierul.
 - După reinstalare, **imaginea de fundal trebuie aleasă din nou** (permisiunea de acces la imagine nu se poate păstra).
 
 ---
