@@ -137,7 +137,7 @@ class ClockWallpaperService : WallpaperService() {
 
         private fun insideClock(x: Float, y: Float): Boolean {
             val (cx, cy, r) = clockGeom()
-            return hypot(x - cx, y - cy) <= r * 1.08f
+            return hypot(x - cx, y - cy) <= r * 1.08f * zoomCur
         }
 
         private fun zoomMax() = prefs.getInt(MainActivity.KEY_ZOOM, 150).coerceIn(110, 200) / 100f
@@ -150,24 +150,13 @@ class ClockWallpaperService : WallpaperService() {
         override fun onTouchEvent(e: MotionEvent) {
             super.onTouchEvent(e)
             lastTouchMs = System.currentTimeMillis()
-            val zoomOn = prefs.getBoolean(MainActivity.KEY_ZOOM_ON, true)
             when (e.actionMasked) {
-                MotionEvent.ACTION_DOWN -> if (insideClock(e.x, e.y)) {
-                    downX = e.x; downY = e.y
-                    if (zoomOn) {
-                        handler.removeCallbacks(zoomOff)
-                        zoomTarget = zoomMax()
-                        kick()
-                    }
-                }
-                // dacă degetul alunecă (schimbi pagina), renunțăm la lupă
-                MotionEvent.ACTION_MOVE -> if (zoomTarget > 1f && hypot(e.x - downX, e.y - downY) > touchSlop) zoomTarget = 1f
+                MotionEvent.ACTION_DOWN -> { downX = e.x; downY = e.y }
                 MotionEvent.ACTION_UP -> {
-                    zoomTarget = 1f
-                    val isTap = e.eventTime - e.downTime < 300 && hypot(e.x - downX, e.y - downY) <= touchSlop
+                    // doar atingere scurtă, fără alunecare (nu la apăsare lungă / schimbare pagină)
+                    val isTap = e.eventTime - e.downTime < 350 && hypot(e.x - downX, e.y - downY) <= touchSlop
                     if (isTap) onTap(e.x, e.y)
                 }
-                MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_POINTER_DOWN -> zoomTarget = 1f
             }
         }
 
@@ -175,34 +164,70 @@ class ClockWallpaperService : WallpaperService() {
         override fun onCommand(action: String?, x: Int, y: Int, z: Int, extras: Bundle?, resultRequested: Boolean): Bundle? {
             if (action == android.app.WallpaperManager.COMMAND_TAP &&
                 System.currentTimeMillis() - lastTouchMs > 1500
-            ) {
-                val fx = x.toFloat(); val fy = y.toFloat()
-                if (prefs.getBoolean(MainActivity.KEY_ZOOM_ON, true) && insideClock(fx, fy)) {
-                    zoomTarget = zoomMax()
-                    handler.removeCallbacks(zoomOff)
-                    handler.postDelayed(zoomOff, 2000)
-                    kick()
-                }
-                onTap(fx, fy)
-            }
+            ) onTap(x.toFloat(), y.toFloat())
             return super.onCommand(action, x, y, z, extras, resultRequested)
         }
 
-        /** Două atingeri rapide pe ceas → deschide aplicația aleasă. */
+        private fun zoomIn() {
+            zoomTarget = zoomMax()
+            handler.removeCallbacks(zoomOff)
+            val sec = prefs.getInt(MainActivity.KEY_ZOOM_SEC, 3).coerceIn(1, 15)
+            handler.postDelayed(zoomOff, sec * 1000L)
+            kick()
+        }
+
+        private fun zoomOutNow() {
+            handler.removeCallbacks(zoomOff)
+            zoomTarget = 1f
+            kick()
+        }
+
+        /**
+         * O atingere pe ceas → se mărește pentru durata din setări.
+         * Încă o atingere cât e mărit → revine imediat la normal.
+         * Două atingeri foarte rapide (sub 0,4 s) → deschide aplicația aleasă.
+         */
         private fun onTap(x: Float, y: Float) {
-            if (!prefs.getBoolean(MainActivity.KEY_DTAP_ON, true) || !insideClock(x, y)) return
+            if (!insideClock(x, y)) return
             val now = System.currentTimeMillis()
-            if (now - lastTapMs < 400 && hypot(x - lastTapX, y - lastTapY) < touchSlop * 4) {
+            if (prefs.getBoolean(MainActivity.KEY_DTAP_ON, true) &&
+                now - lastTapMs < 400 && hypot(x - lastTapX, y - lastTapY) < touchSlop * 4
+            ) {
                 lastTapMs = 0L
-                zoomTarget = 1f
+                zoomOutNow()
                 launchChosenApp()
-            } else {
-                lastTapMs = now; lastTapX = x; lastTapY = y
+                return
             }
+            lastTapMs = now; lastTapX = x; lastTapY = y
+            if (!prefs.getBoolean(MainActivity.KEY_ZOOM_ON, true)) return
+            if (zoomTarget > 1f) zoomOutNow() else zoomIn()
+        }
+
+        /** Vremea: aplicația Samsung/Google dacă e disponibilă, altfel prognoza orașului în browser. */
+        private fun weatherIntent(): Intent {
+            val pkgs = listOf(
+                "com.sec.android.daemonapp",            // Vremea Samsung
+                "com.samsung.android.weather",
+                "com.google.android.apps.weather"
+            )
+            for (p in pkgs) {
+                packageManager.getLaunchIntentForPackage(p)?.let { return it }
+                // aplicația există dar are pictograma ascunsă → căutăm orice activitate principală
+                val main = Intent(Intent.ACTION_MAIN).setPackage(p)
+                if (main.resolveActivity(packageManager) != null) return main
+            }
+            val city = prefs.getString(MainActivity.KEY_CITY, "București") ?: "București"
+            return Intent(Intent.ACTION_VIEW,
+                android.net.Uri.parse("https://www.google.com/search?q=" + android.net.Uri.encode("vremea $city")))
         }
 
         private fun launchChosenApp() {
             val pkg = prefs.getString(MainActivity.KEY_TAP_APP, "") ?: ""
+            if (pkg == MainActivity.TAP_WEATHER) {
+                val wi = weatherIntent().addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                try { startActivity(wi) } catch (_: Exception) {}
+                return
+            }
             val intent = if (pkg.isNotEmpty()) packageManager.getLaunchIntentForPackage(pkg)
                          else Intent(android.provider.AlarmClock.ACTION_SHOW_ALARMS)
             intent ?: return

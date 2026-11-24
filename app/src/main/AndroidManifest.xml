@@ -8,6 +8,9 @@
 
     <!-- necesar pe Android 11+ ca să vedem lista aplicațiilor (atingere dublă) -->
     <queries>
+        <package android:name="com.sec.android.daemonapp" />
+        <package android:name="com.samsung.android.weather" />
+        <package android:name="com.google.android.apps.weather" />
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />

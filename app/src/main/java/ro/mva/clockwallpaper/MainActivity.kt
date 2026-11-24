@@ -33,6 +33,7 @@ class MainActivity : Activity() {
         const val KEY_STEP_CM = "step_cm"
         const val KEY_ZOOM = "zoom_pct"
         const val KEY_ZOOM_ON = "zoom_on"
+        const val KEY_ZOOM_SEC = "zoom_sec"
         const val KEY_GOAL = "step_goal"
         const val KEY_WEIGHT = "weight_kg"
         const val KEY_THEME = "theme"
@@ -41,6 +42,7 @@ class MainActivity : Activity() {
         const val KEY_NIGHT_TO = "night_to"
         const val KEY_DTAP_ON = "dtap_on"
         const val KEY_TAP_APP = "tap_app"
+        const val TAP_WEATHER = "__weather__"
         const val REQ_IMAGE = 42
     }
 
@@ -68,6 +70,7 @@ class MainActivity : Activity() {
 
     private fun appName(pkg: String): String {
         if (pkg.isEmpty()) return "Alarme (implicit)"
+        if (pkg == TAP_WEATHER) return "Vremea"
         return try {
             packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString()
         } catch (_: Exception) { pkg }
@@ -268,7 +271,7 @@ class MainActivity : Activity() {
         // ---- Lupă ----
         root.addView(label("LUPĂ", 15f, "#8FB8FF"))
         root.addView(CheckBox(this).apply {
-            text = "Mărește ceasul cât ții degetul apăsat pe el"
+            text = "O atingere pe ceas îl mărește; încă o atingere îl readuce la normal"
             setTextColor(Color.WHITE)
             isChecked = prefs.getBoolean(KEY_ZOOM_ON, true)
             setOnCheckedChangeListener { _, b -> prefs.edit().putBoolean(KEY_ZOOM_ON, b).apply() }
@@ -287,6 +290,8 @@ class MainActivity : Activity() {
                 override fun onStopTrackingTouch(s: SeekBar?) {}
             })
         })
+
+        slider(KEY_ZOOM_SEC, 3, 1, 15) { "Cât rămâne mărit: $it secunde" }
 
         // ---- Obiectiv + calorii ----
         root.addView(section("OBIECTIV & CALORII"))
@@ -328,11 +333,15 @@ class MainActivity : Activity() {
             ).map { it.loadLabel(pm).toString() to it.activityInfo.packageName }
                 .distinctBy { it.second }
                 .sortedBy { it.first.lowercase() }
-            val names = arrayOf("⏰ Alarme (implicit)") + apps.map { it.first }
+            val names = arrayOf("⏰ Alarme (implicit)", "🌤 Vremea") + apps.map { it.first }
             android.app.AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
                 .setTitle("Aplicație la atingere dublă")
                 .setItems(names) { _, w ->
-                    val pkg = if (w == 0) "" else apps[w - 1].second
+                    val pkg = when (w) {
+                        0 -> ""
+                        1 -> TAP_WEATHER
+                        else -> apps[w - 2].second
+                    }
                     prefs.edit().putString(KEY_TAP_APP, pkg).apply()
                     tapLabel.text = "Aplicație: ${appName(pkg)}"
                 }
