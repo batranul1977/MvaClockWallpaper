@@ -189,10 +189,24 @@ class ClockWallpaperService : WallpaperService() {
          * Încă o atingere cât e mărit → revine imediat la normal.
          * Două atingeri foarte rapide (sub 0,4 s) → deschide aplicația aleasă.
          */
+        /** Zona vremii de pe cadran (sus, între 12 și centru) — ținta pentru deschiderea aplicației. */
+        private fun inWeatherZone(x: Float, y: Float): Boolean {
+            val (cx, cy, r) = clockGeom()
+            val dy = y - cy
+            return kotlin.math.abs(x - cx) < r * 0.34f && dy > -r * 0.62f && dy < -r * 0.14f
+        }
+
         private fun onTap(x: Float, y: Float) {
             if (!insideClock(x, y)) return
             val now = System.currentTimeMillis()
-            if (prefs.getBoolean(MainActivity.KEY_DTAP_ON, true) &&
+            val launchOn = prefs.getBoolean(MainActivity.KEY_DTAP_ON, true)
+            val mode = prefs.getInt(MainActivity.KEY_TAP_MODE, MainActivity.TAP_MODE_ZONE)
+            // Mod 0: o singură atingere pe zona vremii (fără conflict cu „atingere dublă = stinge ecranul" de la Samsung)
+            if (launchOn && mode == MainActivity.TAP_MODE_ZONE && zoomTarget <= 1f && inWeatherZone(x, y)) {
+                launchChosenApp()
+                return
+            }
+            if (launchOn && mode == MainActivity.TAP_MODE_DOUBLE &&
                 now - lastTapMs < 400 && hypot(x - lastTapX, y - lastTapY) < touchSlop * 4
             ) {
                 lastTapMs = 0L

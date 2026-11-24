@@ -43,6 +43,9 @@ class MainActivity : Activity() {
         const val KEY_DTAP_ON = "dtap_on"
         const val KEY_TAP_APP = "tap_app"
         const val TAP_WEATHER = "__weather__"
+        const val KEY_TAP_MODE = "tap_mode"
+        const val TAP_MODE_ZONE = 0     // o atingere pe zona vremii
+        const val TAP_MODE_DOUBLE = 1   // atingere dublă oriunde pe ceas
         const val REQ_IMAGE = 42
         const val REQ_EXPORT = 43
         const val REQ_IMPORT = 44
@@ -391,8 +394,28 @@ class MainActivity : Activity() {
         slider(KEY_NIGHT_TO, 7, 0, 23) { "Se termină la ora: $it:00" }
 
         // ---- Atingere dublă ----
-        root.addView(section("ATINGERE DUBLĂ PE CEAS"))
-        root.addView(check("Două atingeri rapide pe ceas deschid o aplicație", KEY_DTAP_ON, true))
+        root.addView(section("DESCHIDE O APLICAȚIE DIN CEAS"))
+        root.addView(check("Activat", KEY_DTAP_ON, true))
+        root.addView(RadioGroup(this).apply {
+            orientation = RadioGroup.VERTICAL
+            val cur = prefs.getInt(KEY_TAP_MODE, TAP_MODE_ZONE)
+            listOf(
+                TAP_MODE_ZONE to "O atingere pe zona vremii (recomandat pe Samsung)",
+                TAP_MODE_DOUBLE to "Atingere dublă oriunde pe ceas"
+            ).forEach { (m, t) ->
+                addView(RadioButton(this@MainActivity).apply {
+                    id = 2000 + m
+                    text = t
+                    setTextColor(Color.WHITE)
+                    isChecked = m == cur
+                })
+            }
+            setOnCheckedChangeListener { _, id -> prefs.edit().putInt(KEY_TAP_MODE, id - 2000).apply() }
+        })
+        root.addView(label(
+            "Pentru atingere dublă dezactivează în telefon: Setări → Funcții avansate → " +
+                    "Mișcări și gesturi → „Atingeți de 2 ori pentru a opri ecranul”.", 12f
+        ))
         val tapLabel = label("Aplicație: ${appName(prefs.getString(KEY_TAP_APP, "") ?: "")}")
         root.addView(tapLabel)
         root.addView(button("Alege aplicația") {
