@@ -18,7 +18,7 @@
 
 ## 1. Instalare și pornire
 
-1. Instalează APK-ul (`app-debug.apk`) pe telefon. Dacă telefonul cere, permite instalarea din surse necunoscute pentru aplicația cu care ai deschis fișierul.
+1. Instalează APK-ul (`MvaClockWallpaper 1.7.apk`) pe telefon. Dacă telefonul cere, permite instalarea din surse necunoscute pentru aplicația cu care ai deschis fișierul.
 2. Deschide **MVA Clock Wallpaper**.
 3. Apasă **„Permite numărarea pașilor”** și acceptă permisiunea *Activitate fizică*.
 4. Completează **Oraș**, **Latitudine**, **Longitudine** (implicit București: 44.4268 / 26.1025) și apasă **„Salvează setările”**.
