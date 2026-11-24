@@ -134,22 +134,3 @@
 | **Consum de baterie** | Scade *Fluiditate secundar* la 10–15 cadre/s și păstrează activ modul de noapte. |
 | **Fundalul a dispărut** | Alege din nou imaginea („Alege imagine de fundal din galerie”). |
 
----
-
-## 8. Actualizare (build APK prin GitHub)
-
-1. Copiază fișierele modificate în depozitul **batranul1977/MvaClockWallpaper** (upload pe GitHub sau `git push`).
-2. GitHub Actions construiește automat APK-ul (fișierul `.github/workflows/build-apk.yml`).
-3. Deschide fila **Actions** → ultima rulare → secțiunea **Artifacts** → descarcă **MvaClockWallpaper-apk**.
-4. Instalează peste versiunea existentă — setările se păstrează.
-
-**Structura proiectului**
-```
-app/src/main/java/ro/mva/clockwallpaper/
-  ClockRenderer.kt          desenarea cadranului
-  ClockWallpaperService.kt  wallpaper: senzori, vreme, atingeri, lupă
-  MainActivity.kt           ecranul de setări
-  StepHistoryView.kt        grafic 7 zile
-  HourlyStepsView.kt        grafic pe ore
-```
-Copiile versiunilor anterioare sunt în folderele `_backup_v1.x` (nu se urcă pe GitHub).
