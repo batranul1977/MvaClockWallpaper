@@ -50,6 +50,7 @@ class MainActivity : Activity() {
         const val REQ_EXPORT = 43
         const val REQ_IMPORT = 44
         const val KEY_MINIMAL = "minimal"
+        const val KEY_STEP_FACTOR = "step_factor"   // calibrare pași: pași reali / pași măsurați
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -235,6 +236,167 @@ class MainActivity : Activity() {
         }
         histView?.invalidate()   // graficele se actualizează la revenirea în aplicație
         hourView?.invalidate()
+    }
+
+    // ------------------- SETARE PAȘI (calibrare) -------------------
+    /** Cere ceasului să pună pașii/metrii/km la 0; totalul zilei din istoric se păstrează. */
+    private fun confirmStepReset() {
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Resetare pași")
+            .setMessage("Resetezi pașii, metrii și km afișați pe ceas la 0?\n\n" +
+                    "Pașii făcuți deja azi rămân în istoric, iar cei de după reset se adună la ei.")
+            .setPositiveButton("Resetează") { _, _ ->
+                getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                    .putBoolean("steps_rebase_pending", true).commit()
+                Toast.makeText(this, "Pașii vor fi resetați pe ceas (istoricul zilei se păstrează)", Toast.LENGTH_LONG).show()
+            }
+            .setNegativeButton("Anulează", null)
+            .show()
+    }
+
+    /**
+     * Calibrare: Pornește → mergi → Stop → vezi câți pași a numărat telefonul →
+     * introduci numărul REAL → se salvează factorul (real / măsurat) folosit apoi la toți pașii.
+     */
+    private fun showStepSetup() {
+        if (!stepPermOk()) { requestStepPermission(); return }
+        val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val sm = getSystemService(Context.SENSOR_SERVICE) as android.hardware.SensorManager
+        val sensor = sm.getDefaultSensor(android.hardware.Sensor.TYPE_STEP_COUNTER)
+        if (sensor == null) {
+            Toast.makeText(this, "Telefonul nu are senzor de pași", Toast.LENGTH_LONG).show()
+            return
+        }
+
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.parseColor("#0A0E1A"))
+            setPadding(dp(20), dp(20), dp(20), dp(20))
+        }
+        fun tv(t: String, size: Float = 14f, color: String = "#9AA4B8") = TextView(this).apply {
+            text = t; textSize = size; setTextColor(Color.parseColor(color))
+            setPadding(0, dp(8), 0, dp(4))
+        }
+        fun btn(t: String, onClick: () -> Unit) = Button(this).apply {
+            text = t; setTextColor(Color.WHITE)
+            setBackgroundColor(Color.parseColor("#2F7BFF"))
+            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(10) }
+            setOnClickListener { onClick() }
+        }
+
+        box.addView(tv("Setare Pași", 18f, "#8FB8FF"))
+        box.addView(tv("Apasă Pornește, fă un număr de pași pe care îl numeri tu (ideal 20–50), " +
+                "apoi apasă Stop și introdu numărul real."))
+        val status = tv("", 17f, "#FFFFFF")
+        box.addView(status)
+
+        var cStart = -1L
+        var cLast = -1L
+        var running = false
+        var counted = 0
+
+        val listener = object : android.hardware.SensorEventListener {
+            override fun onSensorChanged(e: android.hardware.SensorEvent) {
+                val v = e.values[0].toLong()
+                if (cStart < 0) cStart = v
+                cLast = v
+            }
+            override fun onAccuracyChanged(sensor: android.hardware.Sensor?, accuracy: Int) {}
+        }
+
+        val inputLabel = tv("Introdu Număr Pași Făcuți", 14f, "#8FB8FF").apply { visibility = android.view.View.GONE }
+        val input = EditText(this).apply {
+            setTextColor(Color.WHITE)
+            setHintTextColor(Color.GRAY)
+            hint = "ex. 6"
+            setBackgroundColor(Color.parseColor("#1B2235"))
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            inputType = InputType.TYPE_CLASS_NUMBER
+            visibility = android.view.View.GONE
+        }
+        val saveBtn = btn("Salvează calibrarea") {}.apply { visibility = android.view.View.GONE }
+        val startBtn = btn("Pornește") {}
+        val stopBtn = btn("Stop") {}.apply { isEnabled = false }
+
+        val dialog = android.app.AlertDialog.Builder(this)
+            .setView(ScrollView(this).apply { addView(box) })
+            .setNegativeButton("Închide", null)
+            .create()
+        dialog.setOnDismissListener { try { sm.unregisterListener(listener) } catch (_: Exception) {} }
+
+        startBtn.setOnClickListener {
+            cStart = -1L; cLast = -1L; running = true
+            inputLabel.visibility = android.view.View.GONE
+            input.visibility = android.view.View.GONE
+            saveBtn.visibility = android.view.View.GONE
+            try {
+                sm.registerListener(listener, sensor, android.hardware.SensorManager.SENSOR_DELAY_FASTEST, 0)
+            } catch (_: SecurityException) {
+                running = false
+                status.text = "Permisiunea pentru pași lipsește"
+                return@setOnClickListener
+            }
+            status.text = "Se numără… mergi acum, apoi apasă Stop"
+            startBtn.isEnabled = false
+            stopBtn.isEnabled = true
+        }
+
+        stopBtn.setOnClickListener {
+            if (!running) return@setOnClickListener
+            running = false
+            stopBtn.isEnabled = false
+            status.text = "Se finalizează…"
+            try { sm.flush(listener) } catch (_: Exception) {}
+            // senzorul poate livra ultimele valori cu mică întârziere
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                if (!dialog.isShowing) return@postDelayed
+                try { sm.unregisterListener(listener) } catch (_: Exception) {}
+                startBtn.isEnabled = true
+                if (cStart < 0) {
+                    status.text = "Senzorul nu a răspuns. Încearcă din nou."
+                    return@postDelayed
+                }
+                counted = (cLast - cStart).toInt()
+                if (counted <= 0) {
+                    status.text = "Ai făcut 0 pași (telefonul nu a numărat nimic). Încearcă din nou, cu mai mulți pași."
+                    return@postDelayed
+                }
+                status.text = "Ai făcut $counted pași"
+                inputLabel.visibility = android.view.View.VISIBLE
+                input.visibility = android.view.View.VISIBLE
+                saveBtn.visibility = android.view.View.VISIBLE
+            }, 1500)
+        }
+
+        saveBtn.setOnClickListener {
+            val real = input.text.toString().trim().toIntOrNull()
+            if (real == null || real <= 0) {
+                Toast.makeText(this, "Introdu numărul real de pași (mai mare ca 0)", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            val factor = (real.toFloat() / counted).coerceIn(0.1f, 5f)
+            prefs.edit().putFloat(KEY_STEP_FACTOR, factor).commit()
+            saveSnapshot()
+            Toast.makeText(this,
+                "Salvat: $counted măsurați → $real reali (factor ${String.format(java.util.Locale.US, "%.2f", factor)})",
+                Toast.LENGTH_LONG).show()
+            dialog.dismiss()
+            recreate()
+        }
+
+        box.addView(startBtn)
+        box.addView(stopBtn)
+        box.addView(inputLabel)
+        box.addView(input)
+        box.addView(saveBtn)
+        box.addView(btn("Anulează calibrarea (factor 1,00)") {
+            prefs.edit().putFloat(KEY_STEP_FACTOR, 1f).commit()
+            saveSnapshot()
+            Toast.makeText(this, "Calibrare ștearsă", Toast.LENGTH_SHORT).show()
+            dialog.dismiss()
+            recreate()
+        }.apply { setBackgroundColor(Color.parseColor("#3A4258")) })
+        dialog.show()
     }
 
     private fun appName(pkg: String): String {
@@ -460,6 +622,21 @@ class MainActivity : Activity() {
             })
         })
         root.addView(label("Sfat: înălțime × 0,415 ≈ lungimea pasului (ex. 175 cm → 73 cm)", 12f))
+
+        val factorNow = prefs.getFloat(KEY_STEP_FACTOR, 1f)
+        root.addView(label(
+            if (Math.abs(factorNow - 1f) < 0.005f) "Calibrare pași: neefectuată (factor 1,00)"
+            else "Calibrare pași: factor ${String.format(java.util.Locale.US, "%.2f", factorNow)} " +
+                    "(pașii măsurați de telefon se înmulțesc cu acest factor)",
+            12f, "#86EFAC"
+        ))
+        root.addView(button("Setare Pași") { showStepSetup() })
+        root.addView(button("Resetare pași") { confirmStepReset() })
+        root.addView(label(
+            "Resetare pași: pune pe ceas pașii, metrii și km la 0, dar pașii de azi rămân în istoric " +
+                    "(se adună cu cei făcuți după reset). Oricum, totul se resetează automat după miezul nopții.",
+            12f
+        ))
 
         // ---- Lupă ----
         root.addView(label("LUPĂ", 15f, "#8FB8FF"))

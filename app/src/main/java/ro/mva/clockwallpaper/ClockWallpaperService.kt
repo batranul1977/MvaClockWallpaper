@@ -57,6 +57,7 @@ class ClockWallpaperService : WallpaperService() {
         private var lastTapX = 0f
         private var lastTapY = 0f
         private var lastSavedSteps = -1
+        private var lastRebaseFlushMs = 0L
         private var lastCleanDay = ""
         private var lastAlarmCheck = 0L
 
@@ -286,6 +287,7 @@ class ClockWallpaperService : WallpaperService() {
                 ?: try { holder.lockCanvas() } catch (_: Exception) { null }
                 ?: return
             try {
+                stepHousekeeping()
                 data.city = prefs.getString(MainActivity.KEY_CITY, "București") ?: "București"
                 checkBackground()
                 renderer.draw(
@@ -339,10 +341,51 @@ class ClockWallpaperService : WallpaperService() {
         // ------------------- PAȘI -------------------
         private var stepsRegistered = false
 
+        private fun todayStr() = SimpleDateFormat("yyyyMMdd", Locale.US).format(Date())
+
+        /** Factorul de calibrare din „Setare Pași" (pași reali / pași măsurați de senzor). */
+        private fun stepFactor() = prefs.getFloat(MainActivity.KEY_STEP_FACTOR, 1f).coerceIn(0.1f, 5f)
+
+        /** Pașii deja „băgați" în istoricul zilei prin „Resetare pași" (se adună la cei de după reset). */
+        private fun bankedSteps(day: String): Int =
+            if (prefs.getString("steps_banked_day", "") == day) prefs.getInt("steps_banked", 0) else 0
+
         private fun hasStepPermission(): Boolean =
             android.os.Build.VERSION.SDK_INT < 29 ||
                 checkSelfPermission(android.Manifest.permission.ACTIVITY_RECOGNITION) ==
                 android.content.pm.PackageManager.PERMISSION_GRANTED
+
+        /**
+         * Rulează la fiecare cadru (doar citiri din prefs, foarte ieftin):
+         *  - după miezul nopții: pașii/metrii/km afișați se resetează la 0 (ziua precedentă rămâne în istoric);
+         *  - cerere „Resetare pași" din setări: cerem senzorului valoarea curentă ca să facem resetul exact.
+         */
+        private fun stepHousekeeping() {
+            if (!hasStepPermission()) return
+            val today = todayStr()
+            val savedDay = prefs.getString("steps_day", null)
+            if (savedDay != null && savedDay != today) {
+                saveStepHistory(force = true)   // salvăm definitiv ziua care s-a încheiat
+                prefs.edit()
+                    .putString("steps_day", today)
+                    .remove("steps_base")        // baza nouă se ia la prima valoare a senzorului
+                    .putInt("steps_banked", 0)
+                    .putString("steps_banked_day", today)
+                    .putBoolean("steps_rebase_pending", false)
+                    .apply()
+                data.steps = 0
+                lastSavedSteps = -1
+                if (stepsRegistered) try { sensorManager.flush(this) } catch (_: Exception) {}
+                return
+            }
+            if (prefs.getBoolean("steps_rebase_pending", false)) {
+                val now = System.currentTimeMillis()
+                if (stepsRegistered && now - lastRebaseFlushMs > 2000) {
+                    lastRebaseFlushMs = now
+                    try { sensorManager.flush(this) } catch (_: Exception) {}
+                }
+            }
+        }
 
         /**
          * Senzorul de pași rămâne înregistrat și cu ecranul stins (consum foarte mic):
@@ -352,12 +395,13 @@ class ClockWallpaperService : WallpaperService() {
         private fun registerSteps() {
             data.stepPermMissing = !hasStepPermission()
             if (data.stepPermMissing) return
+            stepHousekeeping()
             // până sosește prima valoare, afișăm ultimii pași salvați azi (nu „--")
             if (data.steps < 0) {
-                val today = SimpleDateFormat("yyyyMMdd", Locale.US).format(Date())
+                val today = todayStr()
                 if (prefs.getString("steps_day", "") == today) {
                     val saved = prefs.getInt("hist_$today", -1)
-                    if (saved >= 0) data.steps = saved
+                    if (saved >= 0) data.steps = (saved - bankedSteps(today)).coerceAtLeast(0)
                 }
             }
             val s = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER) ?: return
@@ -376,31 +420,61 @@ class ClockWallpaperService : WallpaperService() {
         override fun onSensorChanged(event: SensorEvent) {
             if (event.sensor.type != Sensor.TYPE_STEP_COUNTER) return
             val total = event.values[0].toLong()
-            val today = SimpleDateFormat("yyyyMMdd", Locale.US).format(Date())
+            val today = todayStr()
             val savedDay = prefs.getString("steps_day", "")
             var base = prefs.getLong("steps_base", -1L)
-            // zi nouă sau repornire telefon (contorul se resetează) => bază nouă
             val hasBase = prefs.contains("steps_base")
+            val factor = stepFactor()
+            val ed = prefs.edit()
+            var forceSave = false
+            var rolled = false
+
+            // zi nouă / lipsă bază / repornire telefon (contorul se resetează) => bază nouă
             if (savedDay != today || !hasBase || total < base) {
-                // repornire în aceeași zi: contorul a luat-o de la 0 → continuăm de la pașii deja numărați azi
-                base = if (savedDay == today && hasBase && total < base)
-                    total - prefs.getInt("hist_$today", 0).toLong()
-                else total
-                prefs.edit().putString("steps_day", today).putLong("steps_base", base).apply()
+                if (savedDay == today && hasBase && total < base) {
+                    // repornire în aceeași zi: continuăm de la pașii deja numărați de la ultimul reset
+                    val cur = (prefs.getInt("hist_$today", 0) - bankedSteps(today)).coerceAtLeast(0)
+                    base = total - (cur / factor).roundToInt().toLong()
+                } else {
+                    base = total
+                    if (savedDay != today) {
+                        rolled = true
+                        ed.putInt("steps_banked", 0).putString("steps_banked_day", today)
+                    }
+                }
+                ed.putString("steps_day", today).putLong("steps_base", base)
             }
-            data.steps = (total - base).toInt()
-            saveStepHistory(force = false)
+
+            // „Resetare pași": pașii de până acum merg în istoricul zilei, ecranul pornește de la 0
+            if (prefs.getBoolean("steps_rebase_pending", false)) {
+                if (!rolled) {
+                    val cur = ((total - base) * factor).roundToInt().coerceAtLeast(0)
+                    ed.putInt("steps_banked", bankedSteps(today) + cur).putString("steps_banked_day", today)
+                    base = total
+                    ed.putLong("steps_base", base)
+                }
+                ed.putBoolean("steps_rebase_pending", false)
+                forceSave = true
+            }
+            ed.apply()
+
+            data.steps = ((total - base) * factor).roundToInt().coerceAtLeast(0)
+            saveStepHistory(force = forceSave)
         }
 
-        /** Istoric pași: cheia hist_yyyyMMdd = pașii acelei zile (folosit de graficul pe 7 zile). */
+        /**
+         * Istoric pași: cheia hist_yyyyMMdd = TOTALUL zilei (pașii băgați la „Resetare pași" + cei de după reset),
+         * folosit de graficul pe 7 zile.
+         */
         private fun saveStepHistory(force: Boolean) {
             if (data.steps < 0) return
-            if (!force && lastSavedSteps >= 0 && abs(data.steps - lastSavedSteps) < 10) return
             val day = prefs.getString("steps_day", null) ?: return
+            val dayTotal = bankedSteps(day) + data.steps
+            if (!force && lastSavedSteps >= 0 && abs(dayTotal - lastSavedSteps) < 10) return
             val hh = SimpleDateFormat("HH", Locale.US).format(Date())
             val ed = prefs.edit()
-                .putInt("hist_$day", data.steps)
-                .putInt("hcum_${day}_$hh", data.steps)   // total cumulat la ora respectivă (grafic pe ore)
+                .putInt("hist_$day", dayTotal)
+                .putInt("hcum_${day}_$hh", dayTotal)   // total cumulat la ora respectivă (grafic pe ore)
             if (day != lastCleanDay) {
                 // curățenie o dată pe zi: orele din zilele trecute + istoric mai vechi de 60 de zile
                 lastCleanDay = day
@@ -412,7 +486,7 @@ class ClockWallpaperService : WallpaperService() {
                 }
             }
             ed.apply()
-            lastSavedSteps = data.steps
+            lastSavedSteps = dayTotal
         }
 
         /** Următoarea alarmă setată în telefon: "06:30" (în 24 h) sau "Jo 06:30". */
